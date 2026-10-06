@@ -5,6 +5,12 @@ namespace SSDSystemGuard;
 
 internal sealed class GuardManager
 {
+    private static string InstallResultPath =>
+        Path.Combine(GuardPaths.InstallDirectory, "install.result.json");
+
+    private static string InstallLogPath =>
+        Path.Combine(GuardPaths.InstallDirectory, "install.log");
+
     public bool IsInstalled =>
         File.Exists(GuardPaths.GuardCore) &&
         File.Exists(GuardPaths.Panel) &&
@@ -33,23 +39,68 @@ internal sealed class GuardManager
 
         try
         {
+            // Remove confirmation from a previous install so we never mistake
+            // an old success marker for the current attempt.
+            try
+            {
+                if (File.Exists(InstallResultPath))
+                    File.Delete(InstallResultPath);
+            }
+            catch
+            {
+                // Best effort only. The installer writes a timestamped result.
+            }
+
             var psi = new ProcessStartInfo
             {
                 FileName = "powershell.exe",
                 Arguments =
-                    $"-NoProfile -ExecutionPolicy Bypass -File \"{installScript}\"",
+                    "-NoProfile -NonInteractive -STA " +
+                    "-ExecutionPolicy Bypass -WindowStyle Hidden " +
+                    $"-File \"{installScript}\"",
                 UseShellExecute = true,
                 Verb = "runas",
-                WorkingDirectory = staging
+                WorkingDirectory = staging,
+                WindowStyle = ProcessWindowStyle.Hidden
             };
 
             using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException("Could not start installer.");
+                ?? throw new InvalidOperationException(
+                    "Não foi possível iniciar o instalador.");
 
             await process.WaitForExitAsync();
 
-            if (process.ExitCode != 0)
-                throw new InvalidOperationException($"Installer exited with code {process.ExitCode}.");
+            var result = ReadInstallResult();
+
+            // A success marker is authoritative. This also handles the rare
+            // Windows 0xC000013A case where PowerShell is interrupted only
+            // after all critical installation steps have completed.
+            if (result?.Success == true)
+                return;
+
+            if (process.ExitCode == 0)
+                return;
+
+            var unsignedExit = unchecked((uint)process.ExitCode);
+            var hex = $"0x{unsignedExit:X8}";
+
+            if (unsignedExit == 0xC000013A)
+            {
+                throw new InvalidOperationException(
+                    "O instalador do SSD System Guard foi interrompido " +
+                    $"pelo Windows ({hex}).\n\n" +
+                    "A instalação não foi confirmada como concluída.\n" +
+                    $"Log: {InstallLogPath}");
+            }
+
+            var detail = string.IsNullOrWhiteSpace(result?.Message)
+                ? ""
+                : $"\n\nDetalhe: {result.Message}";
+
+            throw new InvalidOperationException(
+                $"O instalador terminou com código {process.ExitCode} ({hex})." +
+                detail +
+                $"\n\nLog: {InstallLogPath}");
         }
         finally
         {
@@ -60,7 +111,9 @@ internal sealed class GuardManager
     public void OpenPanel()
     {
         if (!File.Exists(GuardPaths.Panel))
-            throw new FileNotFoundException("Guard panel was not found.", GuardPaths.Panel);
+            throw new FileNotFoundException(
+                "O painel do Guard não foi encontrado.",
+                GuardPaths.Panel);
 
         ProcessHelper.StartHiddenPowerShell(GuardPaths.Panel);
     }
@@ -68,7 +121,9 @@ internal sealed class GuardManager
     public void StartGuard()
     {
         if (!File.Exists(GuardPaths.GuardCore))
-            throw new FileNotFoundException("Guard core was not found.", GuardPaths.GuardCore);
+            throw new FileNotFoundException(
+                "O núcleo do Guard não foi encontrado.",
+                GuardPaths.GuardCore);
 
         ProcessHelper.StartHiddenPowerShell(GuardPaths.GuardCore);
     }
@@ -76,7 +131,9 @@ internal sealed class GuardManager
     public void StopUntilNextLogin()
     {
         Directory.CreateDirectory(GuardPaths.InstallDirectory);
-        File.WriteAllText(Path.Combine(GuardPaths.InstallDirectory, "stop.flag"), "stop");
+        File.WriteAllText(
+            Path.Combine(GuardPaths.InstallDirectory, "stop.flag"),
+            "stop");
     }
 
     public void PauseOneHour()
@@ -110,31 +167,40 @@ internal sealed class GuardManager
 
     public async Task UninstallAsync()
     {
-        if (!File.Exists(Path.Combine(GuardPaths.InstallDirectory, "Uninstall.ps1")))
+        if (!File.Exists(
+                Path.Combine(GuardPaths.InstallDirectory, "Uninstall.ps1")))
         {
-            // Recreate a clean uninstaller from the embedded copy.
             var staging = ResourceInstaller.CreateStagingDirectory();
+
             Directory.CreateDirectory(GuardPaths.InstallDirectory);
+
             File.Copy(
                 Path.Combine(staging, "Uninstall.ps1"),
-                Path.Combine(GuardPaths.InstallDirectory, "Uninstall.ps1"),
+                Path.Combine(
+                    GuardPaths.InstallDirectory,
+                    "Uninstall.ps1"),
                 true);
+
             TryDeleteDirectory(staging);
         }
 
-        var uninstallScript = Path.Combine(GuardPaths.InstallDirectory, "Uninstall.ps1");
+        var uninstallScript = Path.Combine(
+            GuardPaths.InstallDirectory,
+            "Uninstall.ps1");
 
         var psi = new ProcessStartInfo
         {
             FileName = "powershell.exe",
             Arguments =
-                $"-NoProfile -ExecutionPolicy Bypass -File \"{uninstallScript}\"",
+                "-NoProfile -STA -ExecutionPolicy Bypass " +
+                $"-File \"{uninstallScript}\"",
             UseShellExecute = true,
             Verb = "runas"
         };
 
         using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException("Could not start uninstaller.");
+            ?? throw new InvalidOperationException(
+                "Não foi possível iniciar o desinstalador.");
 
         await process.WaitForExitAsync();
     }
@@ -179,21 +245,34 @@ internal sealed class GuardManager
             if (!File.Exists(GuardPaths.Config))
                 return null;
 
-            using var doc = JsonDocument.Parse(File.ReadAllText(GuardPaths.Config));
+            using var doc = JsonDocument.Parse(
+                File.ReadAllText(GuardPaths.Config));
+
             var root = doc.RootElement;
 
             return new GuardPublicConfig(
-                root.TryGetProperty("Enabled", out var enabled) && enabled.GetBoolean(),
-                root.TryGetProperty("SystemDrive", out var drive) ? drive.GetString() ?? "C:" : "C:",
-                root.TryGetProperty("DownloadProtection", out var dp) && dp.GetBoolean(),
-                root.TryGetProperty("SteamProtection", out var sp) && sp.GetBoolean(),
-                root.TryGetProperty("EpicProtection", out var ep) && ep.GetBoolean(),
-                root.TryGetProperty("PortableGameProtection", out var pp) && pp.GetBoolean(),
-                root.TryGetProperty("UnknownAppAlerts", out var ua) && ua.GetBoolean(),
-                root.TryGetProperty("QuarantinePath", out var qp) ? qp.GetString() ?? string.Empty : string.Empty,
-                root.TryGetProperty("PauseUntil", out var pause) && pause.ValueKind == JsonValueKind.String
-                    ? pause.GetString()
-                    : null
+                root.TryGetProperty("Enabled", out var enabled)
+                    && enabled.GetBoolean(),
+                root.TryGetProperty("SystemDrive", out var drive)
+                    ? drive.GetString() ?? "C:"
+                    : "C:",
+                root.TryGetProperty("DownloadProtection", out var dp)
+                    && dp.GetBoolean(),
+                root.TryGetProperty("SteamProtection", out var sp)
+                    && sp.GetBoolean(),
+                root.TryGetProperty("EpicProtection", out var ep)
+                    && ep.GetBoolean(),
+                root.TryGetProperty("PortableGameProtection", out var pp)
+                    && pp.GetBoolean(),
+                root.TryGetProperty("UnknownAppAlerts", out var ua)
+                    && ua.GetBoolean(),
+                root.TryGetProperty("QuarantinePath", out var qp)
+                    ? qp.GetString() ?? string.Empty
+                    : string.Empty,
+                root.TryGetProperty("PauseUntil", out var pause)
+                    && pause.ValueKind == JsonValueKind.String
+                        ? pause.GetString()
+                        : null
             );
         }
         catch
@@ -202,13 +281,39 @@ internal sealed class GuardManager
         }
     }
 
-    private static void UpdateConfig(Action<Dictionary<string, object?>> update)
+    private static InstallResult? ReadInstallResult()
+    {
+        try
+        {
+            if (!File.Exists(InstallResultPath))
+                return null;
+
+            return JsonSerializer.Deserialize<InstallResult>(
+                File.ReadAllText(InstallResultPath),
+                new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static void UpdateConfig(
+        Action<Dictionary<string, object?>> update)
     {
         if (!File.Exists(GuardPaths.Config))
-            throw new FileNotFoundException("Guard config not found.", GuardPaths.Config);
+            throw new FileNotFoundException(
+                "Configuração do Guard não encontrada.",
+                GuardPaths.Config);
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(GuardPaths.Config));
-        var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        using var doc = JsonDocument.Parse(
+            File.ReadAllText(GuardPaths.Config));
+
+        var dict = new Dictionary<string, object?>(
+            StringComparer.OrdinalIgnoreCase);
 
         foreach (var property in doc.RootElement.EnumerateObject())
             dict[property.Name] = JsonElementToObject(property.Value);
@@ -231,9 +336,15 @@ internal sealed class GuardManager
             JsonValueKind.True => true,
             JsonValueKind.False => false,
             JsonValueKind.Null => null,
-            JsonValueKind.Array => element.EnumerateArray().Select(JsonElementToObject).ToArray(),
-            JsonValueKind.Object => element.EnumerateObject()
-                .ToDictionary(p => p.Name, p => JsonElementToObject(p.Value)),
+            JsonValueKind.Array =>
+                element.EnumerateArray()
+                    .Select(JsonElementToObject)
+                    .ToArray(),
+            JsonValueKind.Object =>
+                element.EnumerateObject()
+                    .ToDictionary(
+                        p => p.Name,
+                        p => JsonElementToObject(p.Value)),
             _ => element.ToString()
         };
 
@@ -249,6 +360,11 @@ internal sealed class GuardManager
             // Staging cleanup is best-effort only.
         }
     }
+
+    private sealed record InstallResult(
+        bool Success,
+        string? Message,
+        string? Timestamp);
 }
 
 internal sealed record GuardPublicConfig(

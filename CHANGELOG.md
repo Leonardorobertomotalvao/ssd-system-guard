@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3
+
+- corrigido erro de instalação `0xC000013A / -1073741510`;
+- instalador elevado agora roda oculto e com `-STA`;
+- instalação grava `install.result.json` e `install.log`;
+- aplicativo valida o resultado real da instalação antes de exibir erro;
+- painel não é mais aberto automaticamente durante a instalação;
+- processo de upgrade encerra somente processos específicos do Guard;
+- mantidos o novo ícone e o branding sem “Definitivo”.
+
 ## 1.0.2
 
 - novo ícone aplicado também ao atalho, painel e ícone da bandeja;
