@@ -1,0 +1,54 @@
+name: Build
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore src/SSDSystemGuard/SSDSystemGuard.csproj
+
+      - name: Publish single EXE
+        shell: pwsh
+        run: |
+          dotnet publish src/SSDSystemGuard/SSDSystemGuard.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -o dist/win-x64 `
+            /p:PublishSingleFile=true `
+            /p:IncludeNativeLibrariesForSelfExtract=true `
+            /p:DebugType=None `
+            /p:DebugSymbols=false
+
+      - name: SHA256
+        shell: pwsh
+        run: |
+          Get-FileHash dist/win-x64/SSDSystemGuard.exe -Algorithm SHA256 |
+            Format-List |
+            Out-File dist/win-x64/SHA256.txt
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SSDSystemGuard-win-x64
+          path: |
+            dist/win-x64/SSDSystemGuard.exe
+            dist/win-x64/SHA256.txt
