@@ -7,6 +7,7 @@ public sealed class MainForm : Form
     private readonly GuardManager _guard = new();
     private readonly Label _status = new();
     private readonly Label _details = new();
+    private readonly CheckBox _startupCheck = new();
     private readonly Button _installButton = new();
     private readonly Button _panelButton = new();
     private readonly Button _resumeButton = new();
@@ -19,16 +20,20 @@ public sealed class MainForm : Form
     private readonly Button _uninstallButton = new();
     private readonly System.Windows.Forms.Timer _timer = new();
 
+    private bool _startupBusy;
+
     public MainForm()
     {
         Text = "SSD System Guard";
 
-        var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(
+            Application.ExecutablePath);
+
         if (appIcon is not null)
             Icon = appIcon;
 
         Width = 760;
-        Height = 610;
+        Height = 655;
         StartPosition = FormStartPosition.CenterScreen;
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false;
@@ -61,35 +66,113 @@ public sealed class MainForm : Form
         _details.Left = 33;
         _details.Top = 160;
         _details.Width = 670;
-        _details.Height = 70;
+        _details.Height = 58;
 
-        ConfigureButton(_installButton, "INSTALAR / ATUALIZAR", 33, 245, InstallClicked);
-        ConfigureButton(_panelButton, "ABRIR PAINEL AVANÇADO", 385, 245, PanelClicked);
+        _startupCheck.Text = "Iniciar SSD System Guard com o Windows";
+        _startupCheck.Font = new Font("Segoe UI", 9);
+        _startupCheck.AutoSize = true;
+        _startupCheck.AutoCheck = false;
+        _startupCheck.Left = 33;
+        _startupCheck.Top = 225;
+        _startupCheck.Cursor = Cursors.Hand;
+        _startupCheck.Click += StartupCheckClicked;
 
-        ConfigureButton(_resumeButton, "ATIVAR / RETOMAR", 33, 310, ResumeClicked);
-        ConfigureButton(_pauseButton, "PAUSAR 1 HORA", 385, 310, PauseClicked);
+        ConfigureButton(
+            _installButton,
+            "INSTALAR / ATUALIZAR",
+            33,
+            265,
+            InstallClicked);
 
-        ConfigureButton(_disableButton, "DESATIVAR PROTEÇÃO", 33, 375, DisableClicked);
-        ConfigureButton(_stopButton, "ENCERRAR ATÉ O PRÓXIMO LOGIN", 385, 375, StopClicked);
+        ConfigureButton(
+            _panelButton,
+            "ABRIR PAINEL AVANÇADO",
+            385,
+            265,
+            PanelClicked);
 
-        ConfigureButton(_logsButton, "ABRIR LOG", 33, 440, (_, _) => SafeAction(_guard.OpenLogs));
-        ConfigureButton(_detectionsButton, "ABRIR DETECÇÕES", 385, 440, (_, _) => SafeAction(_guard.OpenDetections));
+        ConfigureButton(
+            _resumeButton,
+            "ATIVAR / RETOMAR",
+            33,
+            330,
+            ResumeClicked);
 
-        ConfigureButton(_folderButton, "ABRIR PASTA DO GUARD", 33, 505, (_, _) =>
-        {
-            Directory.CreateDirectory(GuardPaths.InstallDirectory);
-            ProcessHelper.OpenInExplorer(GuardPaths.InstallDirectory);
-        });
+        ConfigureButton(
+            _pauseButton,
+            "PAUSAR 1 HORA",
+            385,
+            330,
+            PauseClicked);
 
-        ConfigureButton(_uninstallButton, "DESINSTALAR", 385, 505, UninstallClicked);
+        ConfigureButton(
+            _disableButton,
+            "DESATIVAR PROTEÇÃO",
+            33,
+            395,
+            DisableClicked);
+
+        ConfigureButton(
+            _stopButton,
+            "ENCERRAR ATÉ O PRÓXIMO LOGIN",
+            385,
+            395,
+            StopClicked);
+
+        ConfigureButton(
+            _logsButton,
+            "ABRIR LOG",
+            33,
+            460,
+            (_, _) => SafeAction(_guard.OpenLogs));
+
+        ConfigureButton(
+            _detectionsButton,
+            "ABRIR DETECÇÕES",
+            385,
+            460,
+            (_, _) => SafeAction(_guard.OpenDetections));
+
+        ConfigureButton(
+            _folderButton,
+            "ABRIR PASTA DO GUARD",
+            33,
+            525,
+            (_, _) =>
+            {
+                Directory.CreateDirectory(
+                    GuardPaths.InstallDirectory);
+
+                ProcessHelper.OpenInExplorer(
+                    GuardPaths.InstallDirectory);
+            });
+
+        ConfigureButton(
+            _uninstallButton,
+            "DESINSTALAR",
+            385,
+            525,
+            UninstallClicked);
+
         _uninstallButton.BackColor = Color.MistyRose;
 
         Controls.AddRange(new Control[]
         {
-            title, subtitle, _status, _details,
-            _installButton, _panelButton, _resumeButton, _pauseButton,
-            _disableButton, _stopButton, _logsButton, _detectionsButton,
-            _folderButton, _uninstallButton
+            title,
+            subtitle,
+            _status,
+            _details,
+            _startupCheck,
+            _installButton,
+            _panelButton,
+            _resumeButton,
+            _pauseButton,
+            _disableButton,
+            _stopButton,
+            _logsButton,
+            _detectionsButton,
+            _folderButton,
+            _uninstallButton
         });
 
         _timer.Interval = 2000;
@@ -115,6 +198,70 @@ public sealed class MainForm : Form
         button.Click += handler;
     }
 
+    private async void StartupCheckClicked(
+        object? sender,
+        EventArgs e)
+    {
+        if (_startupBusy || !_guard.IsInstalled)
+            return;
+
+        var desired = !_startupCheck.Checked;
+
+        var message = desired
+            ? "Ativar a inicialização automática do SSD System Guard com o Windows?"
+            : "Desativar a inicialização automática do SSD System Guard com o Windows?";
+
+        var answer = MessageBox.Show(
+            message + "\n\nO Windows poderá solicitar permissão de Administrador.",
+            "SSD System Guard",
+            MessageBoxButtons.YesNo,
+            MessageBoxIcon.Question);
+
+        if (answer != DialogResult.Yes)
+            return;
+
+        _startupBusy = true;
+        _startupCheck.Enabled = false;
+        ToggleUi(false);
+
+        try
+        {
+            await _guard.SetStartWithWindowsAsync(desired);
+
+            var enabled =
+                await _guard.ScheduledTaskExistsAsync();
+
+            _startupCheck.Checked = enabled;
+
+            MessageBox.Show(
+                enabled
+                    ? "O SSD System Guard iniciará automaticamente com o Windows."
+                    : "A inicialização automática com o Windows foi desativada.",
+                "SSD System Guard",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (System.ComponentModel.Win32Exception ex)
+            when (ex.NativeErrorCode == 1223)
+        {
+            MessageBox.Show(
+                "A alteração foi cancelada no UAC.",
+                "SSD System Guard",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            ShowError(ex);
+        }
+        finally
+        {
+            _startupBusy = false;
+            ToggleUi(true);
+            await RefreshStatusAsync();
+        }
+    }
+
     private async void InstallClicked(object? sender, EventArgs e)
     {
         ToggleUi(false);
@@ -129,7 +276,8 @@ public sealed class MainForm : Form
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+        catch (System.ComponentModel.Win32Exception ex)
+            when (ex.NativeErrorCode == 1223)
         {
             MessageBox.Show(
                 "A instalação foi cancelada no UAC.",
@@ -172,6 +320,7 @@ public sealed class MainForm : Form
     private void StopClicked(object? sender, EventArgs e)
     {
         SafeAction(_guard.StopUntilNextLogin);
+
         MessageBox.Show(
             "O Guard recebeu o comando para encerrar até o próximo login.",
             "SSD System Guard",
@@ -182,7 +331,8 @@ public sealed class MainForm : Form
     private async void UninstallClicked(object? sender, EventArgs e)
     {
         var answer = MessageBox.Show(
-            "Desinstalar o SSD System Guard? O desinstalador também desfaz as regras de bloqueio criadas pelo programa.",
+            "Desinstalar o SSD System Guard? " +
+            "O desinstalador também desfaz as regras de bloqueio criadas pelo programa.",
             "SSD System Guard",
             MessageBoxButtons.YesNo,
             MessageBoxIcon.Warning);
@@ -218,53 +368,97 @@ public sealed class MainForm : Form
         try
         {
             var installed = _guard.IsInstalled;
-            var taskExists = installed && await _guard.ScheduledTaskExistsAsync();
-            var cfg = installed ? _guard.ReadPublicConfig() : null;
+
+            var taskExists =
+                installed &&
+                await _guard.ScheduledTaskExistsAsync();
+
+            var cfg =
+                installed
+                    ? _guard.ReadPublicConfig()
+                    : null;
+
+            _startupCheck.Checked = taskExists;
+            _startupCheck.Enabled =
+                installed && !_startupBusy;
 
             if (!installed)
             {
                 _status.Text = "Status: NÃO INSTALADO";
                 _status.ForeColor = Color.DarkRed;
+
                 _details.Text =
-                    "Clique em INSTALAR / ATUALIZAR. O aplicativo pedirá permissão de Administrador apenas quando necessário.";
+                    "Clique em INSTALAR / ATUALIZAR. " +
+                    "Depois, você pode escolher se o Guard deve iniciar com o Windows.";
+
                 return;
             }
 
             if (cfg is null)
             {
-                _status.Text = "Status: INSTALADO — configuração indisponível";
+                _status.Text =
+                    "Status: INSTALADO — configuração indisponível";
+
                 _status.ForeColor = Color.DarkOrange;
-                _details.Text = $"Tarefa de início automático: {(taskExists ? "OK" : "não encontrada")}";
+
+                _details.Text =
+                    $"Iniciar com Windows: {(taskExists ? "ON" : "OFF")}";
+
                 return;
             }
 
             var pauseText = "não";
-            if (DateTime.TryParse(cfg.PauseUntil, out var pauseUntil) && pauseUntil > DateTime.Now)
-                pauseText = $"até {pauseUntil:HH:mm}";
 
-            _status.Text = cfg.Enabled ? "Status: ATIVO" : "Status: DESATIVADO";
-            _status.ForeColor = cfg.Enabled ? Color.DarkGreen : Color.DarkRed;
+            if (
+                DateTime.TryParse(
+                    cfg.PauseUntil,
+                    out var pauseUntil) &&
+                pauseUntil > DateTime.Now)
+            {
+                pauseText = $"até {pauseUntil:HH:mm}";
+            }
+
+            _status.Text =
+                cfg.Enabled
+                    ? "Status: ATIVO"
+                    : "Status: DESATIVADO";
+
+            _status.ForeColor =
+                cfg.Enabled
+                    ? Color.DarkGreen
+                    : Color.DarkRed;
 
             _details.Text =
                 $"Disco protegido: {cfg.SystemDrive}\r\n" +
-                $"Downloads: {YesNo(cfg.DownloadProtection)}   Steam: {YesNo(cfg.SteamProtection)}   Epic: {YesNo(cfg.EpicProtection)}   Portáteis: {YesNo(cfg.PortableGameProtection)}\r\n" +
-                $"Apps desconhecidos: {YesNo(cfg.UnknownAppAlerts)}   Pausado: {pauseText}   Inicialização: {(taskExists ? "OK" : "não configurada")}\r\n" +
-                $"Quarentena: {(string.IsNullOrWhiteSpace(cfg.QuarantinePath) ? "não configurada" : cfg.QuarantinePath)}";
+                $"Downloads: {YesNo(cfg.DownloadProtection)}   " +
+                $"Steam: {YesNo(cfg.SteamProtection)}   " +
+                $"Epic: {YesNo(cfg.EpicProtection)}   " +
+                $"Portáteis: {YesNo(cfg.PortableGameProtection)}\r\n" +
+                $"Apps desconhecidos: {YesNo(cfg.UnknownAppAlerts)}   " +
+                $"Pausado: {pauseText}   " +
+                $"Iniciar com Windows: {(taskExists ? "ON" : "OFF")}\r\n" +
+                $"Quarentena: " +
+                $"{(string.IsNullOrWhiteSpace(cfg.QuarantinePath) ? "não configurada" : cfg.QuarantinePath)}";
         }
         catch
         {
-            _status.Text = "Status: não foi possível verificar";
+            _status.Text =
+                "Status: não foi possível verificar";
+
             _status.ForeColor = Color.DarkOrange;
         }
     }
 
-    private static string YesNo(bool value) => value ? "ON" : "OFF";
+    private static string YesNo(bool value) =>
+        value ? "ON" : "OFF";
 
     private void ToggleUi(bool enabled)
     {
         foreach (Control control in Controls)
+        {
             if (control is Button button)
                 button.Enabled = enabled;
+        }
     }
 
     private static void SafeAction(Action action)

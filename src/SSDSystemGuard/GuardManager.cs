@@ -32,6 +32,106 @@ internal sealed class GuardManager
         }
     }
 
+    public async Task SetStartWithWindowsAsync(bool enabled)
+    {
+        if (!IsInstalled)
+            throw new InvalidOperationException(
+                "Instale o SSD System Guard antes de alterar a inicialização com o Windows.");
+
+        var tempScript = Path.Combine(
+            Path.GetTempPath(),
+            $"SSDGuard_Startup_{Guid.NewGuid():N}.ps1");
+
+        try
+        {
+            var core = GuardPaths.GuardCore.Replace("'", "''");
+            var task = GuardPaths.ScheduledTaskName.Replace("'", "''");
+
+            string script;
+
+            if (enabled)
+            {
+                script = $"""
+$ErrorActionPreference = 'Stop'
+
+$action = New-ScheduledTaskAction `
+    -Execute 'powershell.exe' `
+    -Argument '-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "{core}"'
+
+$trigger = New-ScheduledTaskTrigger `
+    -AtLogOn `
+    -User $env:USERNAME
+
+$settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -StartWhenAvailable `
+    -ExecutionTimeLimit ([TimeSpan]::Zero)
+
+$principal = New-ScheduledTaskPrincipal `
+    -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
+    -LogonType Interactive `
+    -RunLevel Highest
+
+Register-ScheduledTask `
+    -TaskName '{task}' `
+    -Action $action `
+    -Trigger $trigger `
+    -Settings $settings `
+    -Principal $principal `
+    -Description 'SSD System Guard - proteção de downloads e jogos no SSD do sistema.' `
+    -Force | Out-Null
+""";
+            }
+            else
+            {
+                script = $"""
+$ErrorActionPreference = 'Stop'
+Unregister-ScheduledTask `
+    -TaskName '{task}' `
+    -Confirm:$false `
+    -ErrorAction SilentlyContinue
+""";
+            }
+
+            File.WriteAllText(tempScript, script);
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments =
+                    "-NoProfile -NonInteractive -STA " +
+                    "-ExecutionPolicy Bypass -WindowStyle Hidden " +
+                    $"-File \"{tempScript}\"",
+                UseShellExecute = true,
+                Verb = "runas",
+                WindowStyle = ProcessWindowStyle.Hidden
+            };
+
+            using var process = Process.Start(psi)
+                ?? throw new InvalidOperationException(
+                    "Não foi possível alterar a inicialização com o Windows.");
+
+            await process.WaitForExitAsync();
+
+            if (process.ExitCode != 0)
+            {
+                var code = unchecked((uint)process.ExitCode);
+                throw new InvalidOperationException(
+                    $"Não foi possível alterar a inicialização com o Windows (0x{code:X8}).");
+            }
+        }
+        finally
+        {
+            try
+            {
+                if (File.Exists(tempScript))
+                    File.Delete(tempScript);
+            }
+            catch {}
+        }
+    }
+
     public async Task InstallOrUpdateAsync(IntPtr ownerHandle)
     {
         var staging = ResourceInstaller.CreateStagingDirectory();
@@ -39,17 +139,12 @@ internal sealed class GuardManager
 
         try
         {
-            // Remove confirmation from a previous install so we never mistake
-            // an old success marker for the current attempt.
             try
             {
                 if (File.Exists(InstallResultPath))
                     File.Delete(InstallResultPath);
             }
-            catch
-            {
-                // Best effort only. The installer writes a timestamped result.
-            }
+            catch {}
 
             var psi = new ProcessStartInfo
             {
@@ -72,9 +167,6 @@ internal sealed class GuardManager
 
             var result = ReadInstallResult();
 
-            // A success marker is authoritative. This also handles the rare
-            // Windows 0xC000013A case where PowerShell is interrupted only
-            // after all critical installation steps have completed.
             if (result?.Success == true)
                 return;
 
@@ -355,10 +447,7 @@ internal sealed class GuardManager
             if (Directory.Exists(path))
                 Directory.Delete(path, true);
         }
-        catch
-        {
-            // Staging cleanup is best-effort only.
-        }
+        catch {}
     }
 
     private sealed record InstallResult(
