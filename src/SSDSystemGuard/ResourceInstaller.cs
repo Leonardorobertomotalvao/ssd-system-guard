@@ -4,12 +4,13 @@ namespace SSDSystemGuard;
 
 internal static class ResourceInstaller
 {
-    private static readonly string[] ScriptNames =
+    private static readonly string[] ResourceNames =
     {
         "GuardCore.ps1",
         "Panel.ps1",
         "Install.ps1",
-        "Uninstall.ps1"
+        "Uninstall.ps1",
+        "SSDSystemGuard.ico"
     };
 
     public static string CreateStagingDirectory()
@@ -21,13 +22,13 @@ internal static class ResourceInstaller
 
         Directory.CreateDirectory(root);
 
-        foreach (var script in ScriptNames)
-            ExtractScript(script, Path.Combine(root, script));
+        foreach (var resource in ResourceNames)
+            ExtractResource(resource, Path.Combine(root, resource));
 
         return root;
     }
 
-    private static void ExtractScript(string fileName, string destination)
+    private static void ExtractResource(string fileName, string destination)
     {
         var assembly = Assembly.GetExecutingAssembly();
         var resourceName = $"SSDSystemGuard.Resources.{fileName}";

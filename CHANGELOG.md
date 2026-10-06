@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.2
+
+- novo ícone aplicado também ao atalho, painel e ícone da bandeja;
+- removido o nome antigo “Definitivo” da interface e da instalação;
+- pasta local padronizada para `%LOCALAPPDATA%\SSDSystemGuard`;
+- tarefa agendada padronizada para `SSD System Guard`;
+- atualização limpa remove atalhos/tarefas legados e desfaz bloqueios registrados.
+
 ## 1.0.0
 
 Primeira versão pública do aplicativo.

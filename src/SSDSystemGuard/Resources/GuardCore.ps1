@@ -4,7 +4,7 @@ $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
+$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
 $ConfigPath = Join-Path $Base "config.json"
 $StatePath = Join-Path $Base "state.json"
 $LogPath = Join-Path $Base "guard.log"
@@ -13,6 +13,14 @@ $PanelPath = Join-Path $Base "Panel.ps1"
 $StopFlag = Join-Path $Base "stop.flag"
 $TestRedFlag = Join-Path $Base "test_red.flag"
 $TestYellowFlag = Join-Path $Base "test_yellow.flag"
+$IconPath = Join-Path $Base "SSDSystemGuard.ico"
+$script:AppIcon = $null
+
+if (Test-Path $IconPath) {
+    try {
+        $script:AppIcon = New-Object System.Drawing.Icon($IconPath)
+    } catch {}
+}
 
 New-Item -ItemType Directory -Path $Base -Force | Out-Null
 
@@ -24,7 +32,7 @@ try {
     $createdNew = $false
     $script:GuardMutex = [System.Threading.Mutex]::new(
         $true,
-        "Local\SSDSystemGuardDefinitive_$sid",
+        "Local\SSDSystemGuard_$sid",
         [ref]$createdNew
     )
     if (-not $createdNew) { exit }
@@ -354,7 +362,7 @@ function Show-GuardAlert {
     try { [System.Media.SystemSounds]::Exclamation.Play() } catch {}
 
     $form = New-Object System.Windows.Forms.Form
-    $form.Text = "SSD System Guard Definitivo"
+    $form.Text = "SSD System Guard"
     $form.Width = 900
     $form.Height = 570
     $form.StartPosition = "CenterScreen"
@@ -362,6 +370,10 @@ function Show-GuardAlert {
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
     $form.MinimizeBox = $false
+
+    if ($script:AppIcon) {
+        $form.Icon = $script:AppIcon
+    }
 
     $header = New-Object System.Windows.Forms.Panel
     $header.Dock = "Top"
@@ -1252,8 +1264,12 @@ Setup-DownloadWatchers
 # SINGLE TRAY ICON
 # ---------------------------------------------------------------------
 $notify = New-Object System.Windows.Forms.NotifyIcon
-$notify.Icon = [System.Drawing.SystemIcons]::Shield
-$notify.Text = "SSD System Guard Definitivo"
+if ($script:AppIcon) {
+    $notify.Icon = $script:AppIcon
+} else {
+    $notify.Icon = [System.Drawing.SystemIcons]::Shield
+}
+$notify.Text = "SSD System Guard"
 $notify.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
@@ -1355,7 +1371,7 @@ $processTimer.Add_Tick({
 })
 $processTimer.Start()
 
-Write-GuardLog "SSD System Guard Definitivo v3 iniciado."
+Write-GuardLog "SSD System Guard iniciado."
 
 try {
     [System.Windows.Forms.Application]::Run()
@@ -1383,9 +1399,15 @@ try {
     } catch {}
 
     try {
+        if ($script:AppIcon) {
+            $script:AppIcon.Dispose()
+        }
+    } catch {}
+
+    try {
         $script:GuardMutex.ReleaseMutex()
         $script:GuardMutex.Dispose()
     } catch {}
 
-    Write-GuardLog "SSD System Guard Definitivo encerrado."
+    Write-GuardLog "SSD System Guard encerrado."
 }

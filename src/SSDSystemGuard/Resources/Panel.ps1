@@ -4,7 +4,7 @@ $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
+$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
 $ConfigPath = Join-Path $Base "config.json"
 $StatePath = Join-Path $Base "state.json"
 $LogPath = Join-Path $Base "guard.log"
@@ -13,7 +13,15 @@ $CorePath = Join-Path $Base "GuardCore.ps1"
 $StopFlag = Join-Path $Base "stop.flag"
 $TestRedFlag = Join-Path $Base "test_red.flag"
 $TestYellowFlag = Join-Path $Base "test_yellow.flag"
-$TaskName = "SSD System Guard Definitivo"
+$TaskName = "SSD System Guard"
+$IconPath = Join-Path $Base "SSDSystemGuard.ico"
+$script:AppIcon = $null
+
+if (Test-Path $IconPath) {
+    try {
+        $script:AppIcon = New-Object System.Drawing.Icon($IconPath)
+    } catch {}
+}
 
 function Get-Cfg {
     try {
@@ -52,7 +60,7 @@ function Ensure-CoreRunning {
         $running = @(
             Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
             Where-Object {
-                $_.CommandLine -like "*SSDSystemGuardDefinitive*GuardCore.ps1*"
+                $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*"
             }
         ).Count -gt 0
     } catch {}
@@ -124,15 +132,19 @@ function Get-Counts {
 }
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "SSD System Guard Definitivo v3"
+$form.Text = "SSD System Guard"
 $form.Width = 810
 $form.Height = 720
 $form.StartPosition = "CenterScreen"
 $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 
+if ($script:AppIcon) {
+    $form.Icon = $script:AppIcon
+}
+
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "SSD SYSTEM GUARD DEFINITIVO"
+$title.Text = "SSD SYSTEM GUARD"
 $title.Font = New-Object System.Drawing.Font(
     "Segoe UI",23,[System.Drawing.FontStyle]::Bold
 )
@@ -488,3 +500,12 @@ try {
     $timer.Stop()
     $timer.Dispose()
 } catch {}
+
+
+$form.Add_FormClosed({
+    try {
+        if ($script:AppIcon) {
+            $script:AppIcon.Dispose()
+        }
+    } catch {}
+})

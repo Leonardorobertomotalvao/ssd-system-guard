@@ -3,13 +3,15 @@ $ErrorActionPreference = "SilentlyContinue"
 
 Add-Type -AssemblyName System.Windows.Forms
 
-$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
+$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
+$LegacyBase = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
+
 $StatePath = Join-Path $Base "state.json"
 $ConfigPath = Join-Path $Base "config.json"
-$TaskName = "SSD System Guard Definitivo"
 
 $Desktop = [Environment]::GetFolderPath("Desktop")
-$PanelLink = Join-Path $Desktop "SSD Guard Definitivo - Painel.lnk"
+$PanelLink = Join-Path $Desktop "SSD System Guard - Painel.lnk"
+$OldPanelLink = Join-Path $Desktop "SSD Guard Definitivo - Painel.lnk"
 
 function Remove-GuardACL {
     param([string]$Path)
@@ -37,14 +39,44 @@ function Remove-GuardACL {
     } catch {}
 }
 
+function Remove-StateBlocks {
+    param([string]$Folder)
+
+    $stateFile = Join-Path $Folder "state.json"
+    if (-not (Test-Path $stateFile)) { return }
+
+    try {
+        $state = Get-Content $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json
+
+        foreach ($item in @($state.BlockedPaths)) {
+            $p = $null
+
+            if ($item -is [string]) {
+                $p = [string]$item
+            } elseif ($item.PSObject.Properties["Path"]) {
+                $p = [string]$item.Path
+            }
+
+            if ($p) {
+                Remove-GuardACL $p
+            }
+        }
+    } catch {}
+}
+
 $deleteQuarantine = $false
 $quarantine = ""
 
-if (Test-Path $ConfigPath) {
-    try {
-        $cfg = Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
-        $quarantine = [string]$cfg.QuarantinePath
-    } catch {}
+foreach ($cfgPath in @(
+    (Join-Path $Base "config.json"),
+    (Join-Path $LegacyBase "config.json")
+)) {
+    if (-not $quarantine -and (Test-Path $cfgPath)) {
+        try {
+            $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $quarantine = [string]$cfg.QuarantinePath
+        } catch {}
+    }
 }
 
 if ($quarantine -and (Test-Path $quarantine)) {
@@ -64,32 +96,37 @@ try {
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
         Where-Object {
             $_.ProcessId -ne $PID -and
-            $_.CommandLine -like "*SSDSystemGuardDefinitive*"
+            (
+                $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*" -or
+                $_.CommandLine -like "*SSDSystemGuardDefinitive*"
+            )
         } |
         ForEach-Object {
-            Stop-Process -Id $_.ProcessId -Force
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
 } catch {}
 
-if (Test-Path $StatePath) {
-    try {
-        $state = Get-Content $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json
+Remove-StateBlocks $Base
+Remove-StateBlocks $LegacyBase
 
-        foreach ($item in @($state.BlockedPaths)) {
-            Remove-GuardACL ([string]$item.Path)
-        }
+foreach ($taskName in @(
+    "SSD System Guard",
+    "SSD System Guard Download Blocker",
+    "SSD System Guard Definitivo"
+)) {
+    try {
+        Unregister-ScheduledTask -TaskName $taskName `
+            -Confirm:$false -ErrorAction SilentlyContinue
     } catch {}
 }
 
-try {
-    Unregister-ScheduledTask -TaskName $TaskName `
-        -Confirm:$false -ErrorAction SilentlyContinue
-} catch {}
-
 Remove-Item $PanelLink -Force -ErrorAction SilentlyContinue
+Remove-Item $OldPanelLink -Force -ErrorAction SilentlyContinue
 
-if (Test-Path $Base) {
-    Remove-Item $Base -Recurse -Force -ErrorAction SilentlyContinue
+foreach ($folder in @($Base,$LegacyBase)) {
+    if (Test-Path $folder) {
+        Remove-Item $folder -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
 
 if ($deleteQuarantine -and $quarantine -and (Test-Path $quarantine)) {
@@ -97,7 +134,7 @@ if ($deleteQuarantine -and $quarantine -and (Test-Path $quarantine)) {
 }
 
 [System.Windows.Forms.MessageBox]::Show(
-    "SSD System Guard Definitivo removido.`n`nAs regras de bloqueio criadas pelo Guard foram desfeitas.",
+    "SSD System Guard removido.`n`nAs regras de bloqueio criadas pelo Guard foram desfeitas.",
     "SSD System Guard",
     "OK",
     "Information"

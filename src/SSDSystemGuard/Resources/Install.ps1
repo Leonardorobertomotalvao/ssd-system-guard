@@ -3,25 +3,31 @@ $ErrorActionPreference = "Stop"
 
 Add-Type -AssemblyName System.Windows.Forms
 
-$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
+$ProductName = "SSD System Guard"
+$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
+$LegacyBase = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
+
 $CorePath = Join-Path $Base "GuardCore.ps1"
 $PanelPath = Join-Path $Base "Panel.ps1"
+$IconPath = Join-Path $Base "SSDSystemGuard.ico"
 $ConfigPath = Join-Path $Base "config.json"
 $StatePath = Join-Path $Base "state.json"
 $LogPath = Join-Path $Base "guard.log"
 $DetectionsPath = Join-Path $Base "detections.csv"
 
-$TaskName = "SSD System Guard Definitivo"
+$TaskName = "SSD System Guard"
 
 $Desktop = [Environment]::GetFolderPath("Desktop")
-$PanelLink = Join-Path $Desktop "SSD Guard Definitivo - Painel.lnk"
+$PanelLink = Join-Path $Desktop "SSD System Guard - Painel.lnk"
+$OldPanelLink = Join-Path $Desktop "SSD Guard Definitivo - Painel.lnk"
 
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SourceCore = Join-Path $SourceDir "GuardCore.ps1"
 $SourcePanel = Join-Path $SourceDir "Panel.ps1"
+$SourceIcon = Join-Path $SourceDir "SSDSystemGuard.ico"
 
 function Show-Box {
-    param([string]$Text,[string]$Title="SSD System Guard Definitivo")
+    param([string]$Text,[string]$Title="SSD System Guard")
 
     [System.Windows.Forms.MessageBox]::Show(
         $Text,
@@ -31,13 +37,83 @@ function Show-Box {
     ) | Out-Null
 }
 
+function Remove-GuardACL {
+    param([string]$Path)
+
+    if (-not (Test-Path $Path)) { return }
+
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $acl = Get-Acl $Path
+        $changed = $false
+
+        foreach ($rule in @($acl.Access)) {
+            if ($rule.IdentityReference.Value -eq $identity -and
+                $rule.AccessControlType -eq
+                    [System.Security.AccessControl.AccessControlType]::Deny) {
+
+                [void]$acl.RemoveAccessRuleSpecific($rule)
+                $changed = $true
+            }
+        }
+
+        if ($changed) {
+            Set-Acl -Path $Path -AclObject $acl
+        }
+    } catch {}
+}
+
+function Remove-RecordedBlocks {
+    param([string]$Folder)
+
+    $oldState = Join-Path $Folder "state.json"
+    if (-not (Test-Path $oldState)) { return }
+
+    try {
+        $state = Get-Content $oldState -Raw -Encoding UTF8 | ConvertFrom-Json
+
+        foreach ($item in @($state.BlockedPaths)) {
+            $p = $null
+
+            if ($item -is [string]) {
+                $p = [string]$item
+            } elseif ($item.PSObject.Properties["Path"]) {
+                $p = [string]$item.Path
+            }
+
+            if ($p) {
+                Remove-GuardACL $p
+            }
+        }
+    } catch {}
+}
+
 if (-not (Test-Path $SourceCore) -or -not (Test-Path $SourcePanel)) {
     throw "GuardCore.ps1 ou Panel.ps1 não encontrado ao lado do instalador."
 }
 
-New-Item -ItemType Directory -Path $Base -Force | Out-Null
+# Para upgrade limpo, desfaz bloqueios registrados pela versão anterior.
+Remove-RecordedBlocks $Base
+Remove-RecordedBlocks $LegacyBase
 
-# Limpeza preventiva de versões antigas caso tenham restado vestígios.
+# Encerra núcleos antigos/atuais antes da atualização.
+try {
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+        Where-Object {
+            $_.ProcessId -ne $PID -and
+            (
+                $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*" -or
+                $_.CommandLine -like "*SSDSystemGuardDefinitive*GuardCore.ps1*" -or
+                $_.CommandLine -like "*SSDSystemGuard*Monitor.ps1*" -or
+                $_.CommandLine -like "*SSDSystemGuard*DownloadBlocker.ps1*"
+            )
+        } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+} catch {}
+
+# Remove tarefas de versões anteriores.
 foreach ($oldTask in @(
     "SSD System Guard",
     "SSD System Guard Download Blocker",
@@ -49,23 +125,22 @@ foreach ($oldTask in @(
     } catch {}
 }
 
-try {
-    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-        Where-Object {
-            $_.ProcessId -ne $PID -and
-            (
-                $_.CommandLine -like "*SSDSystemGuard*Monitor.ps1*" -or
-                $_.CommandLine -like "*SSDSystemGuard*DownloadBlocker.ps1*" -or
-                $_.CommandLine -like "*SSDSystemGuardDefinitive*GuardCore.ps1*"
-            )
-        } |
-        ForEach-Object {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
-} catch {}
+# Remove o atalho antigo com o nome/tema anterior.
+Remove-Item $OldPanelLink -Force -ErrorAction SilentlyContinue
+
+# Remove apenas a pasta "Definitive" antiga depois de desfazer as ACLs.
+if (Test-Path $LegacyBase) {
+    Remove-Item $LegacyBase -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+New-Item -ItemType Directory -Path $Base -Force | Out-Null
 
 Copy-Item $SourceCore $CorePath -Force
 Copy-Item $SourcePanel $PanelPath -Force
+
+if (Test-Path $SourceIcon) {
+    Copy-Item $SourceIcon $IconPath -Force
+}
 
 # Escolhe quarentena em um disco fixo diferente de C:, preferindo maior espaço livre.
 $QuarantinePath = ""
@@ -89,7 +164,7 @@ try {
 $downloads = Join-Path $env:USERPROFILE "Downloads"
 
 $config = [ordered]@{
-    Version = "3.0"
+    Version = "1.0.2"
     Enabled = $true
     SystemDrive = "C:"
     DownloadProtection = $true
@@ -126,7 +201,7 @@ if ($QuarantinePath) {
         Out-Null
 }
 
-# Painel na área de trabalho.
+# Atalho do painel com o MESMO ícone visual do aplicativo.
 $ws = New-Object -ComObject WScript.Shell
 $shortcut = $ws.CreateShortcut($PanelLink)
 
@@ -139,7 +214,14 @@ $shortcut.Arguments = (
 )
 
 $shortcut.WorkingDirectory = $Base
-$shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,77"
+
+if (Test-Path $IconPath) {
+    $shortcut.IconLocation = "$IconPath,0"
+} else {
+    $shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,77"
+}
+
+$shortcut.Description = "Abrir o painel do SSD System Guard"
 $shortcut.Save()
 
 # Uma única tarefa, um único processo principal.
@@ -168,7 +250,7 @@ Register-ScheduledTask `
     -Trigger $trigger `
     -Settings $settings `
     -Principal $principal `
-    -Description "SSD System Guard Definitivo v3 - proteção de downloads e jogos no SSD C:." `
+    -Description "SSD System Guard - proteção de downloads e jogos no SSD do sistema." `
     -Force | Out-Null
 
 Start-Process powershell.exe -ArgumentList (
@@ -182,20 +264,14 @@ Start-Process powershell.exe -ArgumentList (
 ) -WindowStyle Hidden
 
 Show-Box @"
-SSD System Guard Definitivo v3 instalado.
+SSD System Guard instalado com sucesso.
 
-ARQUITETURA LIMPA:
-• 1 único núcleo;
-• 1 único ícone na bandeja;
-• 1 única tarefa de inicialização;
-• 1 único painel.
-
-PROTEÇÕES:
+PROTEÇÕES ATIVAS:
 • Downloads de risco no C:;
 • novos jogos Steam no C:;
 • novas instalações Epic no C:;
 • jogos portáteis executados de Downloads;
-• alerta de aplicativos desconhecidos.
+• alertas de aplicativos desconhecidos.
 
 Steam e Epic podem abrir normalmente.
 
@@ -205,5 +281,5 @@ Quarentena:
 $(if($QuarantinePath){$QuarantinePath}else{"Nenhum disco alternativo encontrado; arquivos bloqueados finais serão removidos do C:."})
 
 Atalho criado:
-SSD Guard Definitivo - Painel
+SSD System Guard - Painel
 "@
