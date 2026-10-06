@@ -1,10 +1,10 @@
 # Changelog
 
-## 1.0.6
+## 1.0.7
 
-- corrigido popup repetido para o mesmo download Steam bloqueado;
-- corrigida a mesma lógica para novas instalações Epic;
-- um caminho já bloqueado não gera novo popup a cada ciclo de varredura;
-- o Guard confirma que a ACL de bloqueio ainda existe antes de silenciar o alerta;
-- se a pasta for recriada ou a ACL for removida, o Guard pode bloquear e alertar novamente normalmente.
+- o mesmo bloqueio Steam continua sem gerar popup periódico;
+- ao clicar **Retomar** e a Steam fazer uma nova tentativa real de escrita, o Guard volta a mostrar 1 alerta;
+- a detecção usa atividade recente em `Steam\logs\content_log.txt` e o AppID correspondente;
+- a mesma tentativa não gera várias janelas;
+- bloqueios persistentes parados continuam silenciosos.
 

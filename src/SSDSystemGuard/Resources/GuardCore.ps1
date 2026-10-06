@@ -45,6 +45,7 @@ $script:Watchers = @()
 $script:PendingFiles = @{}
 $script:RecentAlerts = @{}
 $script:KnownProcessKeys = @{}
+$script:SteamRetrySignals = @{}
 
 $RiskExtensions = @(
     ".exe",".msi",".iso",".zip",".rar",".7z",".apk",".torrent",
@@ -1085,6 +1086,152 @@ function Remove-AllGuardACLs {
     Save-GuardState $state
 }
 
+function Get-SteamInstallPath {
+    $steam = ""
+
+    try {
+        $steam = [string](
+            Get-ItemProperty "HKCU:\Software\Valve\Steam" `
+                -ErrorAction SilentlyContinue
+        ).SteamPath
+    } catch {}
+
+    if (-not $steam) {
+        try {
+            $steam = [string](
+                Get-ItemProperty `
+                    "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam" `
+                    -ErrorAction SilentlyContinue
+            ).InstallPath
+        } catch {}
+    }
+
+    if ($steam -and (Test-Path $steam)) {
+        return $steam
+    }
+
+    return $null
+}
+
+function Get-SteamRetrySignal {
+    param([string]$AppId)
+
+    if (-not $AppId) {
+        return $null
+    }
+
+    $steam = Get-SteamInstallPath
+
+    if (-not $steam) {
+        return $null
+    }
+
+    $contentLog = Join-Path $steam "logs\content_log.txt"
+
+    if (-not (Test-Path $contentLog)) {
+        return $null
+    }
+
+    try {
+        $item = Get-Item $contentLog -ErrorAction Stop
+
+        # Só considera atividade bem recente. Isso impede um erro antigo do log
+        # de virar um popup novo apenas porque o Guard foi reiniciado.
+        $ageSeconds = (
+            (Get-Date).ToUniversalTime() -
+            $item.LastWriteTimeUtc
+        ).TotalSeconds
+
+        if ($ageSeconds -gt 12) {
+            return $null
+        }
+
+        # A tentativa atual costuma ficar nas últimas linhas do content_log.
+        # Procuramos especificamente o AppID e um resultado ligado a falha/
+        # escrita/remoção do agendamento.
+        $tail = @(
+            Get-Content $contentLog `
+                -Tail 30 `
+                -ErrorAction SilentlyContinue
+        )
+
+        if ($tail.Count -eq 0) {
+            return $null
+        }
+
+        $pattern = (
+            "(?i)AppID\s+" +
+            [regex]::Escape($AppId) +
+            "\b.*(disk write|write failure|failed|failure|removed from schedule)"
+        )
+
+        $matchLine = $tail |
+            Where-Object { $_ -match $pattern } |
+            Select-Object -Last 1
+
+        if (-not $matchLine) {
+            return $null
+        }
+
+        # O LastWriteTime entra no sinal para diferenciar duas tentativas reais
+        # mesmo quando o texto emitido pela Steam for idêntico.
+        return (
+            $item.LastWriteTimeUtc.Ticks.ToString() +
+            "|" +
+            [string]$matchLine
+        )
+    } catch {}
+
+    return $null
+}
+
+function Show-SteamRetryBlockedAlert {
+    param(
+        [string]$AppId,
+        [string]$Path
+    )
+
+    $signal = Get-SteamRetrySignal $AppId
+
+    if (-not $signal) {
+        return
+    }
+
+    if (
+        $script:SteamRetrySignals.ContainsKey($AppId) -and
+        $script:SteamRetrySignals[$AppId] -eq $signal
+    ) {
+        return
+    }
+
+    $script:SteamRetrySignals[$AppId] = $signal
+
+    $action = (
+        "O download continua bloqueado no SSD C:. " +
+        "A Steam permanece aberta. Escolha uma biblioteca em outro SSD/HD."
+    )
+
+    Add-Detection `
+        "BLOQUEADO" `
+        "Tentativa de retomar jogo Steam no C:" `
+        "ALTO" `
+        "Steam" `
+        ("AppID " + $AppId) `
+        $Path `
+        "A Steam tentou novamente gravar no caminho que já está protegido." `
+        $action
+
+    Show-GuardAlert `
+        "BLOQUEADO" `
+        "Tentativa de retomar jogo Steam no C:" `
+        "ALTO" `
+        "Steam" `
+        ("AppID " + $AppId) `
+        $Path `
+        "A Steam tentou novamente gravar no caminho que já está protegido." `
+        $action
+}
+
 # ---------------------------------------------------------------------
 # STEAM PROTECTION
 # ---------------------------------------------------------------------
@@ -1116,9 +1263,12 @@ function Check-SteamDownloads {
 
             $targetPath = $_.FullName
 
-            # Não repete popup/log para a mesma pasta enquanto o bloqueio
-            # criado pelo Guard continuar realmente ativo.
+            # Se a pasta já continua realmente bloqueada, não reaplica ACL
+            # nem gera spam por varredura. Porém, se a Steam registrar uma
+            # NOVA tentativa real de "Retomar", mostramos um único alerta
+            # para aquela tentativa.
             if (Test-GuardPathAlreadyBlocked $targetPath) {
+                Show-SteamRetryBlockedAlert $appid $targetPath
                 return
             }
 
