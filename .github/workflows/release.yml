@@ -46,5 +46,6 @@ jobs:
           gh release create "${{ github.ref_name }}" `
             dist/win-x64/SSDSystemGuard.exe `
             dist/win-x64/SHA256.txt `
+            UNINSTALL_SSD_SYSTEM_GUARD.bat `
             --title "SSD System Guard ${{ github.ref_name }}" `
             --generate-notes
