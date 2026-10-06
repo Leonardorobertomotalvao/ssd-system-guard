@@ -22,6 +22,11 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "SSD System Guard";
+
+        var appIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        if (appIcon is not null)
+            Icon = appIcon;
+
         Width = 760;
         Height = 610;
         StartPosition = FormStartPosition.CenterScreen;
