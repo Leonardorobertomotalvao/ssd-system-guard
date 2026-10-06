@@ -1,10 +1,10 @@
 # Changelog
 
-## 1.0.5
+## 1.0.6
 
-- adiciona opção **Iniciar SSD System Guard com o Windows** na interface;
-- instalação limpa deixa a inicialização automática desativada por padrão;
-- atualização preserva a preferência de inicialização das versões anteriores;
-- marcar/desmarcar a opção cria ou remove a tarefa agendada com confirmação UAC;
-- o Guard continua iniciando imediatamente na sessão em que é instalado.
+- corrigido popup repetido para o mesmo download Steam bloqueado;
+- corrigida a mesma lógica para novas instalações Epic;
+- um caminho já bloqueado não gera novo popup a cada ciclo de varredura;
+- o Guard confirma que a ACL de bloqueio ainda existe antes de silenciar o alerta;
+- se a pasta for recriada ou a ACL for removida, o Guard pode bloquear e alertar novamente normalmente.
 

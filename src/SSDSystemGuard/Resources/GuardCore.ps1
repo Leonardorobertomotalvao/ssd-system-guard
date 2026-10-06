@@ -895,6 +895,92 @@ function Initialize-Baseline {
 # ---------------------------------------------------------------------
 # GUARDED ACL RULES
 # ---------------------------------------------------------------------
+function Test-GuardDenyRulePresent {
+    param([string]$Path)
+
+    if (-not $Path -or -not (Test-Path $Path)) {
+        return $false
+    }
+
+    try {
+        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $acl = Get-Acl $Path
+
+        foreach ($rule in @($acl.Access)) {
+            if (
+                $rule.IdentityReference.Value -eq $identity -and
+                $rule.AccessControlType -eq
+                    [System.Security.AccessControl.AccessControlType]::Deny
+            ) {
+                $rights = [System.Security.AccessControl.FileSystemRights]$rule.FileSystemRights
+
+                if (
+                    ($rights -band [System.Security.AccessControl.FileSystemRights]::Write) -or
+                    ($rights -band [System.Security.AccessControl.FileSystemRights]::Delete) -or
+                    ($rights -band [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles)
+                ) {
+                    return $true
+                }
+            }
+        }
+    } catch {}
+
+    return $false
+}
+
+function Test-GuardPathAlreadyBlocked {
+    param([string]$Path)
+
+    if (-not $Path) {
+        return $false
+    }
+
+    $state = Get-GuardState
+    $normalized = $Path.TrimEnd("\")
+
+    $match = @(
+        $state.BlockedPaths |
+        Where-Object {
+            $_.Path -and
+            ([string]$_.Path).TrimEnd("\").Equals(
+                $normalized,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        }
+    ) | Select-Object -First 1
+
+    if (-not $match) {
+        return $false
+    }
+
+    # Só considera "já bloqueado" se a regra de negação realmente continua
+    # presente. Se o usuário removeu a ACL ou a pasta foi recriada, elimina
+    # a entrada velha do state para permitir um novo bloqueio real.
+    if (Test-GuardDenyRulePresent $Path) {
+        return $true
+    }
+
+    $remaining = @(
+        $state.BlockedPaths |
+        Where-Object {
+            -not (
+                $_.Path -and
+                ([string]$_.Path).TrimEnd("\").Equals(
+                    $normalized,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+            )
+        }
+    )
+
+    $state.BlockedPaths = $remaining
+    Save-GuardState $state
+
+    Write-GuardLog ("STALE BLOCK STATE REMOVED | $Path")
+
+    return $false
+}
+
 function Add-GuardBlockedPath {
     param([string]$Path,[string]$Type)
 
@@ -1028,25 +1114,26 @@ function Check-SteamDownloads {
             if ($appid -notmatch '^\d+$') { return }
             if ($baseline.ContainsKey($appid)) { return }
 
-            $alreadyBlocked = @(
-                $state.BlockedPaths |
-                Where-Object { $_.Path -eq $_.FullName }
-            ).Count -gt 0
+            $targetPath = $_.FullName
 
-            if ($alreadyBlocked) { return }
+            # Não repete popup/log para a mesma pasta enquanto o bloqueio
+            # criado pelo Guard continuar realmente ativo.
+            if (Test-GuardPathAlreadyBlocked $targetPath) {
+                return
+            }
 
-            if (Add-GuardWriteDeny $_.FullName "Steam") {
+            if (Add-GuardWriteDeny $targetPath "Steam") {
                 $action = (
                     "A pasta de download da Steam foi esvaziada e bloqueada para escrita. " +
                     "A Steam permanece aberta. Escolha uma biblioteca em outro SSD/HD."
                 )
 
                 Add-Detection "BLOQUEADO" "Novo jogo Steam no C:" "ALTO" `
-                    "Steam" ("AppID " + $appid) $_.FullName `
+                    "Steam" ("AppID " + $appid) $targetPath `
                     "Novo AppID tentou iniciar download em biblioteca do SSD C:." $action
 
                 Show-GuardAlert "BLOQUEADO" "Novo jogo Steam no C:" "ALTO" `
-                    "Steam" ("AppID " + $appid) $_.FullName `
+                    "Steam" ("AppID " + $appid) $targetPath `
                     "Novo AppID tentou iniciar download em biblioteca do SSD C:." $action
             }
         }
@@ -1089,12 +1176,11 @@ function Check-EpicDownloads {
 
             if ($baseline -contains $parent.ToLowerInvariant()) { continue }
 
-            $alreadyBlocked = @(
-                $state.BlockedPaths |
-                Where-Object { $_.Path -eq $parent }
-            ).Count -gt 0
-
-            if ($alreadyBlocked) { continue }
+            # Mesmo comportamento da Steam: um bloqueio persistente
+            # gera apenas um alerta, sem reaparecer a cada ciclo de varredura.
+            if (Test-GuardPathAlreadyBlocked $parent) {
+                continue
+            }
 
             if (Add-GuardWriteDeny $parent "Epic") {
                 $action = (
