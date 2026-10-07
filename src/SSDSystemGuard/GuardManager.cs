@@ -125,13 +125,20 @@ internal sealed class GuardManager
         var exe = Path.Combine(GuardPaths.InstallDirectory, "SSDSystemGuard.exe");
         if (!File.Exists(exe))
             throw new FileNotFoundException("Host instalado não encontrado.", exe);
+        var panelMode = string.Equals(
+            mode,
+            "--panel",
+            StringComparison.OrdinalIgnoreCase);
+
         Process.Start(new ProcessStartInfo
         {
             FileName = exe,
             Arguments = mode,
             UseShellExecute = false,
             CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden,
+            WindowStyle = panelMode
+                ? ProcessWindowStyle.Normal
+                : ProcessWindowStyle.Hidden,
             WorkingDirectory = GuardPaths.InstallDirectory
         });
     }

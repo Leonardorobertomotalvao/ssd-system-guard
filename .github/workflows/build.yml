@@ -29,6 +29,10 @@ jobs:
         shell: pwsh
         run: ./scripts/validate-powershell.ps1
 
+      - name: Validate project invariants
+        shell: pwsh
+        run: ./scripts/quality-check.ps1
+
       - name: Publish single EXE
         shell: pwsh
         run: |

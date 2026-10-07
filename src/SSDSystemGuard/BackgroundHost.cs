@@ -4,63 +4,44 @@ using System.Text;
 namespace SSDSystemGuard;
 
 /// <summary>
-/// Hosts the existing PowerShell protection logic without exposing a console.
-/// Background mode stays fully hidden; panel mode suppresses only the console
-/// while allowing WinForms windows created by the script to be visible.
+/// Hosts the PowerShell resources without exposing a console.
+/// Background mode detaches immediately so the .NET launcher does not stay
+/// resident beside the Guard. Panel mode remains attached for diagnostics.
 /// </summary>
 internal static class BackgroundHost
 {
-    public static int RunBackground(string script) =>
-        RunPowerShell(script, panelMode: false);
-
-    public static int RunPanel(string script) =>
-        RunPowerShell(script, panelMode: true);
-
-    private static int RunPowerShell(string script, bool panelMode)
+    public static int RunBackground(string script)
     {
         if (!File.Exists(script))
             return 2;
 
         try
         {
-            var powerShell = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.System),
-                @"WindowsPowerShell\v1.0\powershell.exe");
+            using var process = Process.Start(
+                CreatePowerShellStartInfo(script, panelMode: false));
 
-            var psi = new ProcessStartInfo
-            {
-                FileName = powerShell,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WorkingDirectory = GuardPaths.InstallDirectory,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true
-            };
+            return process is null ? 3 : 0;
+        }
+        catch (Exception ex)
+        {
+            WriteHostLog("startup_errors.log", ex.ToString());
+            return 4;
+        }
+    }
 
-            psi.ArgumentList.Add("-NoLogo");
-            psi.ArgumentList.Add("-NoProfile");
-            psi.ArgumentList.Add("-STA");
-            psi.ArgumentList.Add("-ExecutionPolicy");
-            psi.ArgumentList.Add("Bypass");
+    public static int RunPanel(string script)
+    {
+        if (!File.Exists(script))
+            return 2;
 
-            // Important: -WindowStyle Hidden is correct for the background
-            // monitor but can also suppress the first WinForms window created
-            // by PowerShell on some systems. Never use it for panel mode.
-            if (!panelMode)
-            {
-                psi.ArgumentList.Add("-WindowStyle");
-                psi.ArgumentList.Add("Hidden");
-                psi.WindowStyle = ProcessWindowStyle.Hidden;
-            }
-            else
-            {
-                psi.WindowStyle = ProcessWindowStyle.Normal;
-            }
-
-            psi.ArgumentList.Add("-File");
-            psi.ArgumentList.Add(script);
+        try
+        {
+            var psi = CreatePowerShellStartInfo(script, panelMode: true);
+            psi.RedirectStandardError = true;
+            psi.RedirectStandardOutput = true;
 
             using var proc = Process.Start(psi);
+
             if (proc is null)
                 return 3;
 
@@ -75,7 +56,7 @@ internal static class BackgroundHost
             if (proc.ExitCode != 0 || !string.IsNullOrWhiteSpace(stderr))
             {
                 WriteHostLog(
-                    panelMode ? "panel_host_errors.log" : "startup_errors.log",
+                    "panel_host_errors.log",
                     $"ExitCode={proc.ExitCode}{Environment.NewLine}" +
                     $"STDERR:{Environment.NewLine}{stderr}{Environment.NewLine}" +
                     $"STDOUT:{Environment.NewLine}{stdout}");
@@ -85,12 +66,47 @@ internal static class BackgroundHost
         }
         catch (Exception ex)
         {
-            WriteHostLog(
-                panelMode ? "panel_host_errors.log" : "startup_errors.log",
-                ex.ToString());
-
+            WriteHostLog("panel_host_errors.log", ex.ToString());
             return 4;
         }
+    }
+
+    private static ProcessStartInfo CreatePowerShellStartInfo(
+        string script,
+        bool panelMode)
+    {
+        var powerShell = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            @"WindowsPowerShell\v1.0\powershell.exe");
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = powerShell,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = GuardPaths.InstallDirectory,
+            WindowStyle = panelMode
+                ? ProcessWindowStyle.Normal
+                : ProcessWindowStyle.Hidden
+        };
+
+        psi.ArgumentList.Add("-NoLogo");
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-STA");
+        psi.ArgumentList.Add("-ExecutionPolicy");
+        psi.ArgumentList.Add("Bypass");
+
+        if (!panelMode)
+        {
+            psi.ArgumentList.Add("-WindowStyle");
+            psi.ArgumentList.Add("Hidden");
+        }
+
+        psi.ArgumentList.Add("-File");
+        psi.ArgumentList.Add(script);
+
+        return psi;
     }
 
     private static void WriteHostLog(string fileName, string text)

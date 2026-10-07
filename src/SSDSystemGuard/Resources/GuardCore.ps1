@@ -1,5 +1,12 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "SilentlyContinue"
+$ProgressPreference = "SilentlyContinue"
+
+# O Guard deve ceder CPU para jogos e aplicativos do usuário.
+try {
+    [System.Diagnostics.Process]::GetCurrentProcess().PriorityClass =
+        [System.Diagnostics.ProcessPriorityClass]::BelowNormal
+} catch {}
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -57,6 +64,22 @@ $script:RecentAlerts = @{}
 $script:KnownProcessKeys = @{}
 $script:SteamRetrySignals = @{}
 
+# Caches leves para evitar reler JSON/registro/disco em cada ciclo.
+$script:ConfigCache = $null
+$script:ConfigCacheStamp = [long]::MinValue
+$script:ConfigCacheCheckedAt = [datetime]::MinValue
+
+$script:StateCache = $null
+$script:StateCacheStamp = [long]::MinValue
+$script:StateCacheCheckedAt = [datetime]::MinValue
+
+$script:SteamInstallPathCache = $null
+$script:SteamInstallPathCacheUntil = [datetime]::MinValue
+
+$script:SteamLibrariesCache = @()
+$script:SteamLibrariesCacheStamp = ""
+
+
 $RiskExtensions = @(
     ".exe",".msi",".iso",".zip",".rar",".7z",".apk",".torrent",
     ".bat",".cmd",".ps1",".vbs"
@@ -92,45 +115,171 @@ $SafePublishers = @(
 # ---------------------------------------------------------------------
 # CONFIG / STATE
 # ---------------------------------------------------------------------
+function Get-FileStamp {
+    param([string]$Path)
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            return [long]::MinValue
+        }
+
+        return (Get-Item -LiteralPath $Path -ErrorAction Stop).
+            LastWriteTimeUtc.Ticks
+    } catch {
+        return [long]::MinValue
+    }
+}
+
 function Get-GuardConfig {
     try {
-        return (Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json)
+        $now = Get-Date
+
+        if (
+            $script:ConfigCache -and
+            (($now - $script:ConfigCacheCheckedAt).TotalMilliseconds -lt 1000)
+        ) {
+            return $script:ConfigCache
+        }
+
+        $script:ConfigCacheCheckedAt = $now
+        $stamp = Get-FileStamp $ConfigPath
+
+        if (
+            $script:ConfigCache -and
+            $script:ConfigCacheStamp -eq $stamp
+        ) {
+            return $script:ConfigCache
+        }
+
+        if ($stamp -eq [long]::MinValue) {
+            return $script:ConfigCache
+        }
+
+        $cfg = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 |
+            ConvertFrom-Json
+
+        $script:ConfigCache = $cfg
+        $script:ConfigCacheStamp = $stamp
+
+        return $cfg
     } catch {
-        return $null
+        return $script:ConfigCache
     }
 }
 
 function Save-GuardConfig {
     param($Config)
+
     try {
-        $Config | ConvertTo-Json -Depth 12 | Set-Content $ConfigPath -Encoding UTF8
+        $Config |
+            ConvertTo-Json -Depth 12 |
+            Set-Content -LiteralPath $ConfigPath -Encoding UTF8
+
+        $script:ConfigCache = $Config
+        $script:ConfigCacheStamp = Get-FileStamp $ConfigPath
+        $script:ConfigCacheCheckedAt = Get-Date
     } catch {}
+}
+
+function New-DefaultGuardState {
+    return [pscustomobject]@{
+        Initialized = $false
+        SteamBaselineAppIds = @()
+        EpicBaselineLocations = @()
+        BlockedPaths = @()
+        LastBaseline = $null
+    }
 }
 
 function Get-GuardState {
     try {
-        return (Get-Content $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json)
-    } catch {
-        return [pscustomobject]@{
-            Initialized = $false
-            SteamBaselineAppIds = @()
-            EpicBaselineLocations = @()
-            BlockedPaths = @()
-            LastBaseline = $null
+        $now = Get-Date
+
+        if (
+            $script:StateCache -and
+            (($now - $script:StateCacheCheckedAt).TotalMilliseconds -lt 1500)
+        ) {
+            return $script:StateCache
         }
+
+        $script:StateCacheCheckedAt = $now
+        $stamp = Get-FileStamp $StatePath
+
+        if (
+            $script:StateCache -and
+            $script:StateCacheStamp -eq $stamp
+        ) {
+            return $script:StateCache
+        }
+
+        if ($stamp -eq [long]::MinValue) {
+            if (-not $script:StateCache) {
+                $script:StateCache = New-DefaultGuardState
+            }
+
+            return $script:StateCache
+        }
+
+        $state = Get-Content -LiteralPath $StatePath -Raw -Encoding UTF8 |
+            ConvertFrom-Json
+
+        $script:StateCache = $state
+        $script:StateCacheStamp = $stamp
+
+        return $state
+    } catch {
+        if (-not $script:StateCache) {
+            $script:StateCache = New-DefaultGuardState
+        }
+
+        return $script:StateCache
     }
 }
 
 function Save-GuardState {
     param($State)
+
     try {
-        $State | ConvertTo-Json -Depth 15 | Set-Content $StatePath -Encoding UTF8
+        $State |
+            ConvertTo-Json -Depth 15 |
+            Set-Content -LiteralPath $StatePath -Encoding UTF8
+
+        $script:StateCache = $State
+        $script:StateCacheStamp = Get-FileStamp $StatePath
+        $script:StateCacheCheckedAt = Get-Date
     } catch {}
 }
 
 # ---------------------------------------------------------------------
 # LOGGING
 # ---------------------------------------------------------------------
+function Invoke-GuardLogMaintenance {
+    param(
+        [string]$Path,
+        [long]$MaxBytes = 2097152,
+        [int]$KeepLines = 1800
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            return
+        }
+
+        $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+
+        if ($item.Length -le $MaxBytes) {
+            return
+        }
+
+        $tail = @(
+            Get-Content -LiteralPath $Path -Tail $KeepLines -Encoding UTF8
+        )
+
+        $tail |
+            Set-Content -LiteralPath $Path -Encoding UTF8
+    } catch {}
+}
+
 function Write-GuardLog {
     param([string]$Message)
     try {
@@ -886,33 +1035,34 @@ function Drain-DownloadEvents {
 # STEAM / EPIC BASELINES
 # ---------------------------------------------------------------------
 function Get-SteamLibrariesOnC {
-    $libs = @()
-    $steam = ""
+    $steam = Get-SteamInstallPath
 
-    try {
-        $steam = [string](
-            Get-ItemProperty "HKCU:\Software\Valve\Steam" -ErrorAction SilentlyContinue
-        ).SteamPath
-    } catch {}
-
-    if (-not $steam) {
-        try {
-            $steam = [string](
-                Get-ItemProperty "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam" `
-                    -ErrorAction SilentlyContinue
-            ).InstallPath
-        } catch {}
+    if (-not $steam -or -not (Test-Path -LiteralPath $steam)) {
+        $script:SteamLibrariesCache = @()
+        $script:SteamLibrariesCacheStamp = ""
+        return @()
     }
 
-    if (-not $steam -or -not (Test-Path $steam)) { return @() }
-
-    $libs += $steam
-
     $vdf = Join-Path $steam "steamapps\libraryfolders.vdf"
+    $vdfStamp = Get-FileStamp $vdf
+    $cacheStamp = (
+        $steam.ToLowerInvariant() +
+        "|" +
+        $vdfStamp.ToString()
+    )
 
-    if (Test-Path $vdf) {
+    if (
+        $script:SteamLibrariesCacheStamp -eq $cacheStamp -and
+        $script:SteamLibrariesCache
+    ) {
+        return @($script:SteamLibrariesCache)
+    }
+
+    $libs = @($steam)
+
+    if (Test-Path -LiteralPath $vdf) {
         try {
-            $txt = Get-Content $vdf -Raw -Encoding UTF8
+            $txt = Get-Content -LiteralPath $vdf -Raw -Encoding UTF8
 
             foreach ($match in [regex]::Matches(
                 $txt,
@@ -927,9 +1077,21 @@ function Get-SteamLibrariesOnC {
         } catch {}
     }
 
-    return @($libs | Where-Object {
-        $_.StartsWith("C:\",[System.StringComparison]::OrdinalIgnoreCase)
-    })
+    $result = @(
+        $libs |
+        Where-Object {
+            $_ -and $_.StartsWith(
+                "C:\",
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        } |
+        Sort-Object -Unique
+    )
+
+    $script:SteamLibrariesCache = $result
+    $script:SteamLibrariesCacheStamp = $cacheStamp
+
+    return @($result)
 }
 
 function Get-SteamInstalledAppIds {
@@ -1197,6 +1359,16 @@ function Remove-AllGuardACLs {
 }
 
 function Get-SteamInstallPath {
+    $now = Get-Date
+
+    if (
+        $script:SteamInstallPathCache -and
+        $now -lt $script:SteamInstallPathCacheUntil -and
+        (Test-Path -LiteralPath $script:SteamInstallPathCache)
+    ) {
+        return $script:SteamInstallPathCache
+    }
+
     $steam = ""
 
     try {
@@ -1216,9 +1388,14 @@ function Get-SteamInstallPath {
         } catch {}
     }
 
-    if ($steam -and (Test-Path $steam)) {
+    if ($steam -and (Test-Path -LiteralPath $steam)) {
+        $script:SteamInstallPathCache = $steam
+        $script:SteamInstallPathCacheUntil = $now.AddSeconds(60)
         return $steam
     }
+
+    $script:SteamInstallPathCache = $null
+    $script:SteamInstallPathCacheUntil = $now.AddSeconds(15)
 
     return $null
 }
@@ -1465,27 +1642,47 @@ function Check-EpicDownloads {
 # ---------------------------------------------------------------------
 # PORTABLE / UNKNOWN PROCESS PROTECTION
 # ---------------------------------------------------------------------
-function Test-PathInsideBaselineGames {
-    param([string]$Path)
-
+function Get-BaselineGameRoots {
+    $roots = @()
     $state = Get-GuardState
 
     foreach ($loc in @($state.EpicBaselineLocations)) {
-        if ($loc -and $Path.StartsWith(
-            [string]$loc,
-            [System.StringComparison]::OrdinalIgnoreCase
-        )) {
-            return $true
+        if ($loc) {
+            $roots += ([string]$loc).TrimEnd("\")
         }
     }
 
     foreach ($lib in @(Get-SteamLibrariesOnC)) {
-        $common = Join-Path $lib "steamapps\common"
+        if ($lib) {
+            $roots += (Join-Path $lib "steamapps\common")
+        }
+    }
 
-        if ($Path.StartsWith(
-            $common,
-            [System.StringComparison]::OrdinalIgnoreCase
-        )) {
+    return @($roots | Sort-Object -Unique)
+}
+
+function Test-PathInsideBaselineGames {
+    param(
+        [string]$Path,
+        [string[]]$Roots
+    )
+
+    if (-not $Path) {
+        return $false
+    }
+
+    if (-not $Roots) {
+        $Roots = @(Get-BaselineGameRoots)
+    }
+
+    foreach ($root in @($Roots)) {
+        if (
+            $root -and
+            $Path.StartsWith(
+                [string]$root,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        ) {
             return $true
         }
     }
@@ -1493,96 +1690,200 @@ function Test-PathInsideBaselineGames {
     return $false
 }
 
+function Get-ProcessSnapshot {
+    $result = New-Object System.Collections.Generic.List[object]
+
+    foreach ($proc in [System.Diagnostics.Process]::GetProcesses()) {
+        try {
+            $path = [string]$proc.MainModule.FileName
+
+            if (-not $path) {
+                continue
+            }
+
+            $startTicks = 0L
+
+            try {
+                $startTicks = $proc.StartTime.ToUniversalTime().Ticks
+            } catch {}
+
+            $name = [IO.Path]::GetFileName($path)
+
+            $result.Add(
+                [pscustomobject]@{
+                    ProcessId = [int]$proc.Id
+                    Name = $name
+                    ExecutablePath = $path
+                    StartTicks = [long]$startTicks
+                }
+            )
+        } catch {
+            # Processos protegidos do Windows podem negar acesso.
+        } finally {
+            try { $proc.Dispose() } catch {}
+        }
+    }
+
+    return @($result)
+}
+
 function Invoke-ProcessScan {
-    if (Test-IsPaused) { return }
+    if (Test-IsPaused) {
+        return
+    }
 
     $cfg = Get-GuardConfig
-    if (-not $cfg -or -not $cfg.PortableGameProtection) { return }
 
-    $processes = Get-CimInstance Win32_Process `
-        -ErrorAction SilentlyContinue |
-        Where-Object { $_.ExecutablePath }
+    if (-not $cfg -or -not $cfg.PortableGameProtection) {
+        return
+    }
+
+    $systemPrefix = ([string]$cfg.SystemDrive).TrimEnd("\") + "\"
+    $windowsPrefix = $env:WINDIR.TrimEnd("\") + "\"
+    $protectedFolders = @(Get-ProtectedDownloadFolders)
+    $baselineRoots = @(Get-BaselineGameRoots)
+    $processes = @(Get-ProcessSnapshot)
 
     foreach ($process in $processes) {
         $path = [string]$process.ExecutablePath
 
-        if (-not (Test-MonitoredDrive $path)) { continue }
-        if (Test-OfficialWindowsPath $path) { continue }
+        if (
+            -not $path.StartsWith(
+                $systemPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        ) {
+            continue
+        }
+
+        if (
+            $path.StartsWith(
+                $windowsPrefix,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        ) {
+            continue
+        }
 
         $name = [string]$process.Name
 
-        if (Test-AllowedLauncher $name $path) { continue }
-        if (Test-PathInsideBaselineGames $path) { continue }
+        if (Test-AllowedLauncher $name $path) {
+            continue
+        }
 
-        $key = "{0}|{1}" -f $process.ProcessId,[string]$process.CreationDate
+        if (Test-PathInsideBaselineGames $path $baselineRoots) {
+            continue
+        }
 
-        if ($script:KnownProcessKeys.ContainsKey($key)) { continue }
+        $key = "{0}|{1}" -f $process.ProcessId,$process.StartTicks
+
+        if ($script:KnownProcessKeys.ContainsKey($key)) {
+            continue
+        }
+
         $script:KnownProcessKeys[$key] = $true
 
         $isProtectedLocation = $false
 
-        foreach ($folder in @(Get-ProtectedDownloadFolders)) {
-            if ($folder -and $path.StartsWith(
-                $folder,
-                [System.StringComparison]::OrdinalIgnoreCase
-            )) {
+        foreach ($folder in $protectedFolders) {
+            if (
+                $folder -and
+                $path.StartsWith(
+                    [string]$folder,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+            ) {
                 $isProtectedLocation = $true
                 break
             }
         }
 
-        if ($isProtectedLocation -and
-            ((Test-GameLike ($name + " " + $path)) -or
-             (Test-StrongGameMarkers $path))) {
+        if (-not $isProtectedLocation) {
+            continue
+        }
 
+        if (
+            (Test-GameLike ($name + " " + $path)) -or
+            (Test-StrongGameMarkers $path)
+        ) {
             try {
                 Stop-Process -Id ([int]$process.ProcessId) -Force
             } catch {}
 
-            $action = "Processo encerrado porque foi iniciado a partir de uma pasta protegida do C:."
+            $action = (
+                "Processo encerrado porque foi iniciado a partir " +
+                "de uma pasta protegida do C:."
+            )
 
-            Add-Detection "BLOQUEADO" "Jogo portátil / executável de game" "ALTO" `
-                "Processo" $name $path `
+            Add-Detection `
+                "BLOQUEADO" `
+                "Jogo portátil / executável de game" `
+                "ALTO" `
+                "Processo" `
+                $name `
+                $path `
                 "Executável com padrão de jogo iniciado diretamente de uma área protegida de download." `
                 $action
 
-            Show-GuardAlert "BLOQUEADO" "Jogo portátil / executável de game" "ALTO" `
-                "Processo" $name $path `
+            Show-GuardAlert `
+                "BLOQUEADO" `
+                "Jogo portátil / executável de game" `
+                "ALTO" `
+                "Processo" `
+                $name `
+                $path `
                 "Executável com padrão de jogo iniciado diretamente de uma área protegida de download." `
-                $action ([int]$process.ProcessId)
+                $action `
+                ([int]$process.ProcessId)
 
             continue
         }
 
-        if ($isProtectedLocation -and $cfg.UnknownAppAlerts) {
+        if ($cfg.UnknownAppAlerts) {
             $publisher = Get-Publisher $path
 
             if (-not (Test-SafePublisher $publisher)) {
-                $action = "Executável desconhecido detectado. Valide a assinatura/editor antes de permitir."
+                $publisherText = if ($publisher) {
+                    $publisher
+                } else {
+                    "não verificado"
+                }
 
-                Add-Detection "SUSPEITO / REQUER VALIDACAO" `
-                    "Aplicativo desconhecido" "MEDIO" "Processo" `
-                    $name $path `
-                    ("Executável iniciado de Downloads. Editor: " +
-                     $(if($publisher){$publisher}else{"não verificado"})) `
+                $action = (
+                    "Executável desconhecido detectado. Valide a " +
+                    "assinatura/editor antes de permitir."
+                )
+
+                Add-Detection `
+                    "SUSPEITO / REQUER VALIDACAO" `
+                    "Aplicativo desconhecido" `
+                    "MEDIO" `
+                    "Processo" `
+                    $name `
+                    $path `
+                    ("Executável iniciado de Downloads. Editor: " + $publisherText) `
                     $action
 
-                Show-GuardAlert "SUSPEITO / REQUER VALIDACAO" `
-                    "Aplicativo desconhecido" "MEDIO" "Processo" `
-                    $name $path `
-                    ("Executável iniciado de Downloads. Editor: " +
-                     $(if($publisher){$publisher}else{"não verificado"})) `
-                    $action ([int]$process.ProcessId)
+                Show-GuardAlert `
+                    "SUSPEITO / REQUER VALIDACAO" `
+                    "Aplicativo desconhecido" `
+                    "MEDIO" `
+                    "Processo" `
+                    $name `
+                    $path `
+                    ("Executável iniciado de Downloads. Editor: " + $publisherText) `
+                    $action `
+                    ([int]$process.ProcessId)
             }
         }
     }
 
-    if ($script:KnownProcessKeys.Count -gt 1500) {
+    if ($script:KnownProcessKeys.Count -gt 1000) {
         $current = @{}
 
         foreach ($process in $processes) {
             $current[
-                "{0}|{1}" -f $process.ProcessId,[string]$process.CreationDate
+                "{0}|{1}" -f $process.ProcessId,$process.StartTicks
             ] = $true
         }
 
@@ -1594,15 +1895,14 @@ function Invoke-ProcessScan {
 # INITIALIZATION
 # ---------------------------------------------------------------------
 try {
-    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
-        Where-Object { $_.ExecutablePath } |
-        ForEach-Object {
-            $script:KnownProcessKeys[
-                "{0}|{1}" -f $_.ProcessId,[string]$_.CreationDate
-            ] = $true
-        }
+    foreach ($process in @(Get-ProcessSnapshot)) {
+        $script:KnownProcessKeys[
+            "{0}|{1}" -f $process.ProcessId,$process.StartTicks
+        ] = $true
+    }
 } catch {}
 
+Invoke-GuardLogMaintenance $LogPath
 Initialize-Baseline
 Setup-DownloadWatchers
 
@@ -1664,7 +1964,7 @@ $notify.Add_DoubleClick({
 # TIMERS
 # ---------------------------------------------------------------------
 $fastTimer = New-Object System.Windows.Forms.Timer
-$fastTimer.Interval = 1000
+$fastTimer.Interval = 1500
 $fastTimer.Add_Tick({
     Drain-DownloadEvents
     Retry-PendingFiles
@@ -1675,31 +1975,11 @@ $fastTimer.Add_Tick({
         return
     }
 
-    if (Test-Path $TestRedFlag) {
-        Remove-Item $TestRedFlag -Force
-
-        Show-GuardAlert "BLOQUEADO" "TESTE - jogo/download" "ALTO" `
-            "Teste interno" "Steam_Game_Test.exe" `
-            "C:\Users\Teste\Downloads\Steam_Game_Test.exe" `
-            "Alerta vermelho de teste do SSD System Guard." `
-            "Nenhum arquivo real foi alterado."
-    }
-
-    if (Test-Path $TestYellowFlag) {
-        Remove-Item $TestYellowFlag -Force
-
-        Show-GuardAlert "SUSPEITO / REQUER VALIDACAO" `
-            "TESTE - aplicativo desconhecido" "MEDIO" `
-            "Teste interno" "Programa_Desconhecido.exe" `
-            "C:\Users\Teste\Downloads\Programa_Desconhecido.exe" `
-            "Alerta amarelo de teste do SSD System Guard." `
-            "Nenhum arquivo real foi alterado."
-    }
 })
 $fastTimer.Start()
 
 $gameTimer = New-Object System.Windows.Forms.Timer
-$gameTimer.Interval = 2000
+$gameTimer.Interval = 3000
 $gameTimer.Add_Tick({
     Check-SteamDownloads
     Check-EpicDownloads
@@ -1707,7 +1987,7 @@ $gameTimer.Add_Tick({
 $gameTimer.Start()
 
 $processTimer = New-Object System.Windows.Forms.Timer
-$processTimer.Interval = 4000
+$processTimer.Interval = 5000
 $processTimer.Add_Tick({
     Invoke-ProcessScan
 })

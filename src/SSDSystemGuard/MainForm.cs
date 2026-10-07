@@ -126,7 +126,7 @@ public sealed class MainForm : Form
         }
         scroll.SizeChanged += (_, _) => ResizeLayout();
         Shown += async (_, _) => { ResizeLayout(); await RefreshStatusAsync(); };
-        _timer.Interval = 3000;
+        _timer.Interval = 5000;
         _timer.Tick += async (_, _) => await RefreshStatusAsync();
         _timer.Start();
         FormClosed += (_, _) => _timer.Dispose();
