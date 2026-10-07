@@ -1,394 +1,191 @@
 ﻿#requires -Version 5.1
+param([Parameter(Mandatory=$true)][string]$AppExe)
+
 $ErrorActionPreference = "Stop"
 
-$ProductName = "SSD System Guard"
-$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
-$LegacyBase = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
-
+$Base = Join-Path $env:ProgramData "SSDSystemGuard"
+$Data = Join-Path $Base "Data"
 $CorePath = Join-Path $Base "GuardCore.ps1"
 $PanelPath = Join-Path $Base "Panel.ps1"
 $IconPath = Join-Path $Base "SSDSystemGuard.ico"
-$ConfigPath = Join-Path $Base "config.json"
-$StatePath = Join-Path $Base "state.json"
-$LogPath = Join-Path $Base "guard.log"
-$DetectionsPath = Join-Path $Base "detections.csv"
-$InstallLogPath = Join-Path $Base "install.log"
-$InstallResultPath = Join-Path $Base "install.result.json"
-
+$ConfigPath = Join-Path $Data "config.json"
+$LogPath = Join-Path $Data "guard.log"
+$DetectionsPath = Join-Path $Data "detections.csv"
+$InstallLogPath = Join-Path $Data "install.log"
+$InstallResultPath = Join-Path $Data "install.result.json"
 $TaskName = "SSD System Guard"
 
-$Desktop = [Environment]::GetFolderPath("Desktop")
-$PanelLink = Join-Path $Desktop "SSD System Guard - Painel.lnk"
-$OldPanelLink = Join-Path $Desktop "SSD Guard Definitivo - Painel.lnk"
+$LegacyBase = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
+$LegacyDefinitive = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
+
+$CommonDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+$PanelLink = Join-Path $CommonDesktop "SSD System Guard.lnk"
+$OldUserDesktop = [Environment]::GetFolderPath("Desktop")
 
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SourceCore = Join-Path $SourceDir "GuardCore.ps1"
+$InstalledExe = Join-Path $Base "SSDSystemGuard.exe"
 $SourcePanel = Join-Path $SourceDir "Panel.ps1"
 $SourceIcon = Join-Path $SourceDir "SSDSystemGuard.ico"
 $SourceUninstall = Join-Path $SourceDir "Uninstall.ps1"
 
-function Write-InstallLog {
-    param([string]$Message)
-
+function Write-InstallLog([string]$Message) {
     try {
-        New-Item -ItemType Directory -Path $Base -Force |
-            Out-Null
-
-        $line = "[{0}] {1}" -f (
-            Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-        ), $Message
-
-        Add-Content -LiteralPath $InstallLogPath `
-            -Value $line `
-            -Encoding UTF8
+        New-Item -ItemType Directory -Path $Data -Force | Out-Null
+        Add-Content $InstallLogPath ("[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"),$Message) -Encoding UTF8
     } catch {}
 }
 
-function Write-InstallResult {
-    param(
-        [bool]$Success,
-        [string]$Message
-    )
-
+function Write-InstallResult([bool]$Success,[string]$Message) {
     try {
-        New-Item -ItemType Directory -Path $Base -Force |
-            Out-Null
-
-        [ordered]@{
-            Success = $Success
-            Message = $Message
-            Timestamp = (Get-Date).ToString("o")
-        } |
-            ConvertTo-Json -Depth 5 |
-            Set-Content -LiteralPath $InstallResultPath `
-                -Encoding UTF8
+        [ordered]@{ Success=$Success; Message=$Message; Timestamp=(Get-Date).ToString("o") } |
+            ConvertTo-Json | Set-Content $InstallResultPath -Encoding UTF8
     } catch {}
 }
 
-function Remove-GuardACL {
-    param([string]$Path)
-
-    if (-not (Test-Path $Path)) { return }
-
-    try {
-        $identity =
-            [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-
-        $acl = Get-Acl $Path
-        $changed = $false
-
-        foreach ($rule in @($acl.Access)) {
-            if (
-                $rule.IdentityReference.Value -eq $identity -and
-                $rule.AccessControlType -eq
-                    [System.Security.AccessControl.AccessControlType]::Deny
-            ) {
-                [void]$acl.RemoveAccessRuleSpecific($rule)
-                $changed = $true
+function Remove-LegacyRules([string]$Folder) {
+    foreach ($stateFile in @(Get-ChildItem $Folder -Filter "state*.json" -File -ErrorAction SilentlyContinue)) {
+        try {
+            $state = Get-Content $stateFile.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            foreach ($item in @($state.BlockedPaths)) {
+                $p=[string]$item.Path
+                if (-not $p -or -not (Test-Path $p)) { continue }
+                $identity = if ($item.Identity) { [string]$item.Identity } else { [System.Security.Principal.WindowsIdentity]::GetCurrent().Name }
+                $acl=Get-Acl $p; $changed=$false
+                foreach($rule in @($acl.Access)) {
+                    if ($rule.IdentityReference.Value -eq $identity -and $rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) {
+                        [void]$acl.RemoveAccessRuleSpecific($rule); $changed=$true
+                    }
+                }
+                if ($changed) { Set-Acl -Path $p -AclObject $acl }
             }
-        }
-
-        if ($changed) {
-            Set-Acl -Path $Path -AclObject $acl
-        }
-    } catch {}
-}
-
-function Remove-RecordedBlocks {
-    param([string]$Folder)
-
-    $oldState = Join-Path $Folder "state.json"
-
-    if (-not (Test-Path $oldState)) {
-        return
+        } catch {}
     }
-
-    try {
-        $state =
-            Get-Content $oldState -Raw -Encoding UTF8 |
-            ConvertFrom-Json
-
-        foreach ($item in @($state.BlockedPaths)) {
-            $p = $null
-
-            if ($item -is [string]) {
-                $p = [string]$item
-            }
-            elseif ($item.PSObject.Properties["Path"]) {
-                $p = [string]$item.Path
-            }
-
-            if ($p) {
-                Remove-GuardACL $p
-            }
-        }
-    } catch {}
 }
 
-function Register-StartupTask {
-    $action = New-ScheduledTaskAction `
-        -Execute "powershell.exe" `
-        -Argument (
-            "-NoProfile -STA -ExecutionPolicy Bypass " +
-            "-WindowStyle Hidden -File `"$CorePath`""
-        )
-
-    $trigger = New-ScheduledTaskTrigger `
-        -AtLogOn `
-        -User $env:USERNAME
-
-    $settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -StartWhenAvailable `
-        -ExecutionTimeLimit ([TimeSpan]::Zero)
-
-    $principal = New-ScheduledTaskPrincipal `
-        -UserId (
-            [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-        ) `
-        -LogonType Interactive `
-        -RunLevel Highest
-
-    Register-ScheduledTask `
-        -TaskName $TaskName `
-        -Action $action `
-        -Trigger $trigger `
-        -Settings $settings `
-        -Principal $principal `
-        -Description (
-            "SSD System Guard - proteção de downloads e jogos no SSD do sistema."
-        ) `
-        -Force |
-        Out-Null
+function Register-AllUsersTask {
+    # WinExe host starts PowerShell child with CreateNoWindow, avoiding black console.
+    $action = New-ScheduledTaskAction -Execute $InstalledExe -Argument "--background"
+    # UserId vazio = qualquer logon; GroupId Users = roda na sessão interativa
+    # de qualquer membro do grupo local Users.
+    $trigger = New-ScheduledTaskTrigger -AtLogOn
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
+    $principal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Highest
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "SSD System Guard - proteção para todas as contas locais." -Force | Out-Null
 }
 
 try {
-    New-Item -ItemType Directory -Path $Base -Force |
-        Out-Null
+    New-Item -ItemType Directory -Path $Base -Force | Out-Null
+    New-Item -ItemType Directory -Path $Data -Force | Out-Null
 
-    Remove-Item -LiteralPath $InstallResultPath `
-        -Force -ErrorAction SilentlyContinue
+    # Dados compartilhados podem ser atualizados pelas contas locais; scripts
+    # permanecem protegidos no diretório pai do ProgramData.
+    # Users can read and execute installed code, but must not edit it.
+    # Mutable per-user state and logs remain in the Data directory.
+    & icacls.exe $Base /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-32-545:(OI)(CI)RX' /C | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao configurar ACL da pasta de instalação." }
+    & icacls.exe $Data /grant:r '*S-1-5-32-545:(OI)(CI)M' /C | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Falha ao configurar ACL da pasta de dados." }
 
-    Write-InstallLog "Início da instalação/atualização v1.0.5."
+    Remove-Item $InstallResultPath -Force -ErrorAction SilentlyContinue
+    Write-InstallLog "Início da instalação machine-wide v1.1.1."
 
-    if (
-        -not (Test-Path $SourceCore) -or
-        -not (Test-Path $SourcePanel) -or
-        -not (Test-Path $SourceIcon)
-    ) {
+    if (-not (Test-Path $SourceCore) -or -not (Test-Path $SourcePanel) -or -not (Test-Path $SourceIcon) -or -not (Test-Path $AppExe -PathType Leaf)) {
         throw "Recursos essenciais do instalador não foram encontrados."
     }
 
-    # Preserva a preferência de quem já usava uma versão anterior.
-    $HadStartupTask = $false
-
-    foreach ($existingTask in @(
-        "SSD System Guard",
-        "SSD System Guard Download Blocker",
-        "SSD System Guard Definitivo"
-    )) {
-        try {
-            if (
-                Get-ScheduledTask `
-                    -TaskName $existingTask `
-                    -ErrorAction SilentlyContinue
-            ) {
-                $HadStartupTask = $true
-                break
-            }
-        } catch {}
-    }
-
-    Remove-RecordedBlocks $Base
-    Remove-RecordedBlocks $LegacyBase
+    Remove-LegacyRules $LegacyBase
+    Remove-LegacyRules $LegacyDefinitive
 
     try {
         Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-            Where-Object {
-                $_.ProcessId -ne $PID -and
-                (
-                    $_.CommandLine -like "*\SSDSystemGuard\GuardCore.ps1*" -or
-                    $_.CommandLine -like "*\SSDSystemGuard\Panel.ps1*" -or
-                    $_.CommandLine -like "*\SSDSystemGuardDefinitive\GuardCore.ps1*" -or
-                    $_.CommandLine -like "*\SSDSystemGuardDefinitive\Panel.ps1*"
-                )
-            } |
-            ForEach-Object {
-                Stop-Process -Id $_.ProcessId `
-                    -Force `
-                    -ErrorAction SilentlyContinue
-            }
+            Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*" } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     } catch {}
 
-    foreach ($oldTask in @(
-        "SSD System Guard",
-        "SSD System Guard Download Blocker",
-        "SSD System Guard Definitivo"
-    )) {
-        try {
-            Unregister-ScheduledTask `
-                -TaskName $oldTask `
-                -Confirm:$false `
-                -ErrorAction SilentlyContinue
-        } catch {}
+    foreach($t in @("SSD System Guard","SSD System Guard Download Blocker","SSD System Guard Definitivo")) {
+        Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
     }
 
-    Remove-Item $OldPanelLink `
-        -Force `
-        -ErrorAction SilentlyContinue
+    # Stop an old installed host before updating its executable.
+    try {
+        Get-CimInstance Win32_Process -Filter "Name='SSDSystemGuard.exe'" |
+            Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ieq $InstalledExe } |
+            ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
+    Start-Sleep -Milliseconds 600
 
-    if (Test-Path $LegacyBase) {
-        Remove-Item $LegacyBase `
-            -Recurse `
-            -Force `
-            -ErrorAction SilentlyContinue
+    if (-not [string]::Equals(( [IO.Path]::GetFullPath($AppExe) ),
+                             ( [IO.Path]::GetFullPath($InstalledExe) ),
+                             [StringComparison]::OrdinalIgnoreCase)) {
+        Copy-Item -LiteralPath $AppExe -Destination $InstalledExe -Force -ErrorAction Stop
     }
-
-    New-Item -ItemType Directory -Path $Base -Force |
-        Out-Null
-
     Copy-Item $SourceCore $CorePath -Force
     Copy-Item $SourcePanel $PanelPath -Force
     Copy-Item $SourceIcon $IconPath -Force
+    if (Test-Path $SourceUninstall) { Copy-Item $SourceUninstall (Join-Path $Base "Uninstall.ps1") -Force }
 
-    if (Test-Path $SourceUninstall) {
-        Copy-Item $SourceUninstall `
-            (Join-Path $Base "Uninstall.ps1") `
-            -Force
+    $oldCfg=$null
+    foreach($candidate in @((Join-Path $LegacyBase "config.json"),(Join-Path $LegacyDefinitive "config.json"),$ConfigPath)) {
+        if (-not $oldCfg -and (Test-Path $candidate)) { try { $oldCfg=Get-Content $candidate -Raw -Encoding UTF8 | ConvertFrom-Json } catch {} }
     }
 
-    $QuarantinePath = ""
-
-    try {
-        $candidate =
-            Get-CimInstance Win32_LogicalDisk `
-                -Filter "DriveType=3" |
-            Where-Object {
-                $_.DeviceID -ne "C:" -and
-                [uint64]$_.FreeSpace -gt 1073741824
-            } |
-            Sort-Object FreeSpace -Descending |
-            Select-Object -First 1
-
-        if ($candidate) {
-            $QuarantinePath =
-                Join-Path (
-                    $candidate.DeviceID + "\"
-                ) "SSDGuard_Quarantine"
-        }
-    } catch {}
-
-    $downloads =
-        Join-Path $env:USERPROFILE "Downloads"
-
-    $config = [ordered]@{
-        Version = "1.0.5"
-        Enabled = $true
-        SystemDrive = "C:"
-        DownloadProtection = $true
-        SteamProtection = $true
-        EpicProtection = $true
-        PortableGameProtection = $true
-        UnknownAppAlerts = $true
-        ProtectedDownloadFolders = @($downloads)
-        QuarantinePath = $QuarantinePath
-        PauseUntil = $null
+    $QuarantinePath = if ($oldCfg -and $oldCfg.QuarantinePath) { [string]$oldCfg.QuarantinePath } else { "" }
+    if (-not $QuarantinePath) {
+        try {
+            $candidate = Get-CimInstance Win32_LogicalDisk -Filter "DriveType=3" |
+                Where-Object { $_.DeviceID -ne "C:" -and [uint64]$_.FreeSpace -gt 1073741824 } |
+                Sort-Object FreeSpace -Descending | Select-Object -First 1
+            if ($candidate) { $QuarantinePath = Join-Path ($candidate.DeviceID + "\") "SSDGuard_Quarantine" }
+        } catch {}
     }
 
-    $config |
-        ConvertTo-Json -Depth 12 |
-        Set-Content $ConfigPath -Encoding UTF8
-
-    [ordered]@{
-        Initialized = $false
-        SteamBaselineAppIds = @()
-        EpicBaselineLocations = @()
-        BlockedPaths = @()
-        LastBaseline = $null
-    } |
-        ConvertTo-Json -Depth 15 |
-        Set-Content $StatePath -Encoding UTF8
-
-    "" |
-        Set-Content $LogPath -Encoding UTF8
-
-    if (-not (Test-Path $DetectionsPath)) {
-        'Timestamp,Status,Category,Risk,Source,Name,Path,Reason,Action' |
-            Set-Content $DetectionsPath -Encoding UTF8
+    $config=[ordered]@{
+        Version="1.1.1"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
+        DownloadProtection=if($oldCfg){[bool]$oldCfg.DownloadProtection}else{$true}
+        SteamProtection=if($oldCfg){[bool]$oldCfg.SteamProtection}else{$true}
+        EpicProtection=if($oldCfg){[bool]$oldCfg.EpicProtection}else{$true}
+        PortableGameProtection=if($oldCfg){[bool]$oldCfg.PortableGameProtection}else{$true}
+        UnknownAppAlerts=if($oldCfg){[bool]$oldCfg.UnknownAppAlerts}else{$true}
+        ProtectedDownloadFolders=@(); QuarantinePath=$QuarantinePath; PauseUntil=$null
     }
+    $config | ConvertTo-Json -Depth 12 | Set-Content $ConfigPath -Encoding UTF8
+    if (-not (Test-Path $DetectionsPath)) { 'Timestamp,Status,Category,Risk,Source,Name,Path,Reason,Action' | Set-Content $DetectionsPath -Encoding UTF8 }
+    if (-not (Test-Path $LogPath)) { "" | Set-Content $LogPath -Encoding UTF8 }
+    if ($QuarantinePath) { New-Item -ItemType Directory -Path $QuarantinePath -Force | Out-Null }
 
-    if ($QuarantinePath) {
-        New-Item -ItemType Directory `
-            -Path $QuarantinePath `
-            -Force |
-            Out-Null
-    }
-
-    $ws = New-Object -ComObject WScript.Shell
-    $shortcut = $ws.CreateShortcut($PanelLink)
-
-    $shortcut.TargetPath =
-        "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
-
-    $shortcut.Arguments =
-        "-NoProfile -STA -ExecutionPolicy Bypass " +
-        "-WindowStyle Hidden -File `"$PanelPath`""
-
-    $shortcut.WorkingDirectory = $Base
-    $shortcut.IconLocation = "$IconPath,0"
-    $shortcut.Description =
-        "Abrir o painel do SSD System Guard"
-
+    # Atalho público: aparece para todas as contas do Windows.
+    $ws=New-Object -ComObject WScript.Shell
+    $shortcut=$ws.CreateShortcut($PanelLink)
+    $shortcut.TargetPath=$InstalledExe
+    $shortcut.Arguments="--panel"
+    $shortcut.WorkingDirectory=$Base
+    $shortcut.IconLocation="$IconPath,0"
+    $shortcut.Description="Abrir SSD System Guard"
     $shortcut.Save()
 
-    # Instalação limpa: inicialização com Windows fica OFF por padrão.
-    # Atualização: preserva a preferência anterior.
-    if ($HadStartupTask) {
-        Register-StartupTask
-        Write-InstallLog (
-            "Preferência anterior preservada: " +
-            "inicialização com Windows ativada."
-        )
-    }
-    else {
-        Write-InstallLog (
-            "Inicialização com Windows desativada por padrão. " +
-            "O usuário pode ativá-la pelo aplicativo."
-        )
-    }
+    foreach($oldLink in @(
+        (Join-Path $OldUserDesktop "SSD System Guard - Painel.lnk"),
+        (Join-Path $OldUserDesktop "SSD Guard Definitivo - Painel.lnk")
+    )) { Remove-Item $oldLink -Force -ErrorAction SilentlyContinue }
 
-    # O Guard sempre inicia na sessão atual após instalar.
-    Start-Process powershell.exe `
-        -ArgumentList (
-            "-NoProfile -STA -ExecutionPolicy Bypass " +
-            "-WindowStyle Hidden -File `"$CorePath`""
-        ) `
-        -WindowStyle Hidden
+    Register-AllUsersTask
+    Write-InstallLog "Tarefa para qualquer usuário local registrada."
 
-    Start-Sleep -Milliseconds 800
+    # Inicia já na conta que fez a instalação; próximas contas entram pela tarefa.
+    Start-Process -FilePath $InstalledExe -ArgumentList "--background" -WindowStyle Hidden
+    Start-Sleep -Milliseconds 900
 
-    Write-InstallResult `
-        -Success $true `
-        -Message "Instalação concluída com sucesso."
+    # Remove somente versões antigas por usuário após migrar/desbloquear.
+    Remove-Item $LegacyBase -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item $LegacyDefinitive -Recurse -Force -ErrorAction SilentlyContinue
 
-    Write-InstallLog "Instalação v1.0.5 concluída com sucesso."
-
+    Write-InstallResult $true "Instalação para todas as contas concluída com sucesso."
+    Write-InstallLog "Instalação v1.1.1 concluída."
     exit 0
 }
 catch {
-    $message = $_.Exception.Message
-
-    Write-InstallLog (
-        "ERRO: " +
-        $message +
-        " | " +
-        $_.ScriptStackTrace
-    )
-
-    Write-InstallResult `
-        -Success $false `
-        -Message $message
-
+    Write-InstallLog ("ERRO: " + $_.Exception.Message + " | " + $_.ScriptStackTrace)
+    Write-InstallResult $false $_.Exception.Message
     exit 1
 }

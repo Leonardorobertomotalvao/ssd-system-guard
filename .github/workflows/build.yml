@@ -25,6 +25,10 @@ jobs:
       - name: Restore
         run: dotnet restore src/SSDSystemGuard/SSDSystemGuard.csproj
 
+      - name: Validate embedded PowerShell 5.1 scripts
+        shell: pwsh
+        run: ./scripts/validate-powershell.ps1
+
       - name: Publish single EXE
         shell: pwsh
         run: |

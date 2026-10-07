@@ -1,141 +1,62 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "SilentlyContinue"
-
 Add-Type -AssemblyName System.Windows.Forms
 
-$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
-$LegacyBase = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
+$Base = Join-Path $env:ProgramData "SSDSystemGuard"
+$Data = Join-Path $Base "Data"
+$ConfigPath = Join-Path $Data "config.json"
+$TaskName = "SSD System Guard"
+$CommonDesktop = [Environment]::GetFolderPath("CommonDesktopDirectory")
+$PanelLink = Join-Path $CommonDesktop "SSD System Guard.lnk"
 
-$StatePath = Join-Path $Base "state.json"
-$ConfigPath = Join-Path $Base "config.json"
-
-$Desktop = [Environment]::GetFolderPath("Desktop")
-$PanelLink = Join-Path $Desktop "SSD System Guard - Painel.lnk"
-$OldPanelLink = Join-Path $Desktop "SSD Guard Definitivo - Painel.lnk"
-
-function Remove-GuardACL {
-    param([string]$Path)
-
-    if (-not (Test-Path $Path)) { return }
-
-    try {
-        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-        $acl = Get-Acl $Path
-        $changed = $false
-
-        foreach ($rule in @($acl.Access)) {
-            if ($rule.IdentityReference.Value -eq $identity -and
-                $rule.AccessControlType -eq
-                    [System.Security.AccessControl.AccessControlType]::Deny) {
-
-                [void]$acl.RemoveAccessRuleSpecific($rule)
-                $changed = $true
-            }
-        }
-
-        if ($changed) {
-            Set-Acl -Path $Path -AclObject $acl
-        }
-    } catch {}
-}
-
-function Remove-StateBlocks {
-    param([string]$Folder)
-
-    $stateFile = Join-Path $Folder "state.json"
-    if (-not (Test-Path $stateFile)) { return }
-
-    try {
-        $state = Get-Content $stateFile -Raw -Encoding UTF8 | ConvertFrom-Json
-
-        foreach ($item in @($state.BlockedPaths)) {
-            $p = $null
-
-            if ($item -is [string]) {
-                $p = [string]$item
-            } elseif ($item.PSObject.Properties["Path"]) {
-                $p = [string]$item.Path
-            }
-
-            if ($p) {
-                Remove-GuardACL $p
-            }
-        }
-    } catch {}
-}
-
-$deleteQuarantine = $false
-$quarantine = ""
-
-foreach ($cfgPath in @(
-    (Join-Path $Base "config.json"),
-    (Join-Path $LegacyBase "config.json")
-)) {
-    if (-not $quarantine -and (Test-Path $cfgPath)) {
+function Remove-StateBlocks([string]$StatePath) {
+    if (-not (Test-Path $StatePath)) { return }
+    try { $state=Get-Content $StatePath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { return }
+    foreach($item in @($state.BlockedPaths)) {
+        $p=[string]$item.Path
+        if (-not $p -or -not (Test-Path $p)) { continue }
+        $identity = if ($item.Identity) { [string]$item.Identity } else { $null }
+        if (-not $identity) { continue }
         try {
-            $cfg = Get-Content $cfgPath -Raw -Encoding UTF8 | ConvertFrom-Json
-            $quarantine = [string]$cfg.QuarantinePath
+            $acl=Get-Acl $p; $changed=$false
+            foreach($rule in @($acl.Access)) {
+                if ($rule.IdentityReference.Value -eq $identity -and $rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Deny) {
+                    [void]$acl.RemoveAccessRuleSpecific($rule); $changed=$true
+                }
+            }
+            if ($changed) { Set-Acl $p $acl }
         } catch {}
     }
 }
 
-if ($quarantine -and (Test-Path $quarantine)) {
-    $answer = [System.Windows.Forms.MessageBox]::Show(
-        "Também deseja APAGAR a pasta de quarentena e os arquivos dentro dela?`n`n$quarantine",
-        "Desinstalar SSD System Guard",
-        [System.Windows.Forms.MessageBoxButtons]::YesNo,
-        [System.Windows.Forms.MessageBoxIcon]::Warning
-    )
-
-    if ($answer -eq [System.Windows.Forms.DialogResult]::Yes) {
-        $deleteQuarantine = $true
-    }
-}
+$quarantine=""
+if (Test-Path $ConfigPath) { try { $quarantine=[string](Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json).QuarantinePath } catch {} }
 
 try {
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-        Where-Object {
-            $_.ProcessId -ne $PID -and
-            (
-                $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*" -or
-                $_.CommandLine -like "*SSDSystemGuardDefinitive*"
-            )
-        } |
-        ForEach-Object {
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
+        Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*" } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 } catch {}
 
-Remove-StateBlocks $Base
-Remove-StateBlocks $LegacyBase
-
-foreach ($taskName in @(
-    "SSD System Guard",
-    "SSD System Guard Download Blocker",
-    "SSD System Guard Definitivo"
-)) {
-    try {
-        Unregister-ScheduledTask -TaskName $taskName `
-            -Confirm:$false -ErrorAction SilentlyContinue
-    } catch {}
-}
-
+# Termina hosts instalados que mantêm o executável aberto em outras sessões.
+try {
+    Get-CimInstance Win32_Process -Filter "Name='SSDSystemGuard.exe'" |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ieq (Join-Path $Base 'SSDSystemGuard.exe') } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+} catch {}
+Start-Sleep -Milliseconds 600
+foreach($state in @(Get-ChildItem $Data -Filter "state-*.json" -File -ErrorAction SilentlyContinue)) { Remove-StateBlocks $state.FullName }
+foreach($t in @("SSD System Guard","SSD System Guard Download Blocker","SSD System Guard Definitivo")) { Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue }
 Remove-Item $PanelLink -Force -ErrorAction SilentlyContinue
-Remove-Item $OldPanelLink -Force -ErrorAction SilentlyContinue
 
-foreach ($folder in @($Base,$LegacyBase)) {
-    if (Test-Path $folder) {
-        Remove-Item $folder -Recurse -Force -ErrorAction SilentlyContinue
-    }
+$deleteQ=$false
+if ($quarantine -and (Test-Path $quarantine)) {
+    $answer=[System.Windows.Forms.MessageBox]::Show("Deseja também apagar a quarentena e todos os arquivos dentro dela?`n`n$quarantine","SSD System Guard - Desinstalar",[System.Windows.Forms.MessageBoxButtons]::YesNo,[System.Windows.Forms.MessageBoxIcon]::Warning)
+    $deleteQ=($answer -eq [System.Windows.Forms.DialogResult]::Yes)
 }
 
-if ($deleteQuarantine -and $quarantine -and (Test-Path $quarantine)) {
-    Remove-Item $quarantine -Recurse -Force -ErrorAction SilentlyContinue
-}
+Remove-Item $Base -Recurse -Force -ErrorAction SilentlyContinue
+if ($deleteQ -and $quarantine) { Remove-Item $quarantine -Recurse -Force -ErrorAction SilentlyContinue }
 
-[System.Windows.Forms.MessageBox]::Show(
-    "SSD System Guard removido.`n`nAs regras de bloqueio criadas pelo Guard foram desfeitas.",
-    "SSD System Guard",
-    "OK",
-    "Information"
-) | Out-Null
+[System.Windows.Forms.MessageBox]::Show("SSD System Guard removido deste computador para todas as contas locais.","SSD System Guard",[System.Windows.Forms.MessageBoxButtons]::OK,[System.Windows.Forms.MessageBoxIcon]::Information) | Out-Null
+exit 0

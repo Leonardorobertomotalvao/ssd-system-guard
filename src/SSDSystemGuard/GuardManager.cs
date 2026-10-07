@@ -6,10 +6,10 @@ namespace SSDSystemGuard;
 internal sealed class GuardManager
 {
     private static string InstallResultPath =>
-        Path.Combine(GuardPaths.InstallDirectory, "install.result.json");
+        Path.Combine(GuardPaths.DataDirectory, "install.result.json");
 
     private static string InstallLogPath =>
-        Path.Combine(GuardPaths.InstallDirectory, "install.log");
+        Path.Combine(GuardPaths.DataDirectory, "install.log");
 
     public bool IsInstalled =>
         File.Exists(GuardPaths.GuardCore) &&
@@ -29,106 +29,6 @@ internal sealed class GuardManager
         catch
         {
             return false;
-        }
-    }
-
-    public async Task SetStartWithWindowsAsync(bool enabled)
-    {
-        if (!IsInstalled)
-            throw new InvalidOperationException(
-                "Instale o SSD System Guard antes de alterar a inicialização com o Windows.");
-
-        var tempScript = Path.Combine(
-            Path.GetTempPath(),
-            $"SSDGuard_Startup_{Guid.NewGuid():N}.ps1");
-
-        try
-        {
-            var core = GuardPaths.GuardCore.Replace("'", "''");
-            var task = GuardPaths.ScheduledTaskName.Replace("'", "''");
-
-            string script;
-
-            if (enabled)
-            {
-                script = $"""
-$ErrorActionPreference = 'Stop'
-
-$action = New-ScheduledTaskAction `
-    -Execute 'powershell.exe' `
-    -Argument '-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File "{core}"'
-
-$trigger = New-ScheduledTaskTrigger `
-    -AtLogOn `
-    -User $env:USERNAME
-
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -ExecutionTimeLimit ([TimeSpan]::Zero)
-
-$principal = New-ScheduledTaskPrincipal `
-    -UserId ([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) `
-    -LogonType Interactive `
-    -RunLevel Highest
-
-Register-ScheduledTask `
-    -TaskName '{task}' `
-    -Action $action `
-    -Trigger $trigger `
-    -Settings $settings `
-    -Principal $principal `
-    -Description 'SSD System Guard - proteção de downloads e jogos no SSD do sistema.' `
-    -Force | Out-Null
-""";
-            }
-            else
-            {
-                script = $"""
-$ErrorActionPreference = 'Stop'
-Unregister-ScheduledTask `
-    -TaskName '{task}' `
-    -Confirm:$false `
-    -ErrorAction SilentlyContinue
-""";
-            }
-
-            File.WriteAllText(tempScript, script);
-
-            var psi = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments =
-                    "-NoProfile -NonInteractive -STA " +
-                    "-ExecutionPolicy Bypass -WindowStyle Hidden " +
-                    $"-File \"{tempScript}\"",
-                UseShellExecute = true,
-                Verb = "runas",
-                WindowStyle = ProcessWindowStyle.Hidden
-            };
-
-            using var process = Process.Start(psi)
-                ?? throw new InvalidOperationException(
-                    "Não foi possível alterar a inicialização com o Windows.");
-
-            await process.WaitForExitAsync();
-
-            if (process.ExitCode != 0)
-            {
-                var code = unchecked((uint)process.ExitCode);
-                throw new InvalidOperationException(
-                    $"Não foi possível alterar a inicialização com o Windows (0x{code:X8}).");
-            }
-        }
-        finally
-        {
-            try
-            {
-                if (File.Exists(tempScript))
-                    File.Delete(tempScript);
-            }
-            catch {}
         }
     }
 
@@ -152,7 +52,7 @@ Unregister-ScheduledTask `
                 Arguments =
                     "-NoProfile -NonInteractive -STA " +
                     "-ExecutionPolicy Bypass -WindowStyle Hidden " +
-                    $"-File \"{installScript}\"",
+                    $"-File \"{installScript}\" -AppExe \"{Environment.ProcessPath}\"",
                 UseShellExecute = true,
                 Verb = "runas",
                 WorkingDirectory = staging,
@@ -207,7 +107,7 @@ Unregister-ScheduledTask `
                 "O painel do Guard não foi encontrado.",
                 GuardPaths.Panel);
 
-        ProcessHelper.StartHiddenPowerShell(GuardPaths.Panel);
+        StartInstalledHost("--panel");
     }
 
     public void StartGuard()
@@ -217,15 +117,29 @@ Unregister-ScheduledTask `
                 "O núcleo do Guard não foi encontrado.",
                 GuardPaths.GuardCore);
 
-        ProcessHelper.StartHiddenPowerShell(GuardPaths.GuardCore);
+        StartInstalledHost("--background");
+    }
+
+    private static void StartInstalledHost(string mode)
+    {
+        var exe = Path.Combine(GuardPaths.InstallDirectory, "SSDSystemGuard.exe");
+        if (!File.Exists(exe))
+            throw new FileNotFoundException("Host instalado não encontrado.", exe);
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = exe,
+            Arguments = mode,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
+            WorkingDirectory = GuardPaths.InstallDirectory
+        });
     }
 
     public void StopUntilNextLogin()
     {
-        Directory.CreateDirectory(GuardPaths.InstallDirectory);
-        File.WriteAllText(
-            Path.Combine(GuardPaths.InstallDirectory, "stop.flag"),
-            "stop");
+        Directory.CreateDirectory(GuardPaths.DataDirectory);
+        File.WriteAllText(GuardPaths.StopFlag, "stop");
     }
 
     public void PauseOneHour()
@@ -259,47 +173,45 @@ Unregister-ScheduledTask `
 
     public async Task UninstallAsync()
     {
-        if (!File.Exists(
-                Path.Combine(GuardPaths.InstallDirectory, "Uninstall.ps1")))
-        {
-            var staging = ResourceInstaller.CreateStagingDirectory();
-
-            Directory.CreateDirectory(GuardPaths.InstallDirectory);
-
-            File.Copy(
-                Path.Combine(staging, "Uninstall.ps1"),
-                Path.Combine(
-                    GuardPaths.InstallDirectory,
-                    "Uninstall.ps1"),
-                true);
-
-            TryDeleteDirectory(staging);
-        }
-
+        string? staging = null;
         var uninstallScript = Path.Combine(
             GuardPaths.InstallDirectory,
             "Uninstall.ps1");
 
-        var psi = new ProcessStartInfo
+        try
         {
-            FileName = "powershell.exe",
-            Arguments =
-                "-NoProfile -STA -ExecutionPolicy Bypass " +
-                $"-File \"{uninstallScript}\"",
-            UseShellExecute = true,
-            Verb = "runas"
-        };
+            if (!File.Exists(uninstallScript))
+            {
+                staging = ResourceInstaller.CreateStagingDirectory();
+                uninstallScript = Path.Combine(staging, "Uninstall.ps1");
+            }
 
-        using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException(
-                "Não foi possível iniciar o desinstalador.");
+            var psi = new ProcessStartInfo
+            {
+                FileName = "powershell.exe",
+                Arguments =
+                    "-NoProfile -STA -ExecutionPolicy Bypass " +
+                    $"-File \"{uninstallScript}\"",
+                UseShellExecute = true,
+                Verb = "runas"
+            };
 
-        await process.WaitForExitAsync();
+            using var process = Process.Start(psi)
+                ?? throw new InvalidOperationException(
+                    "Não foi possível iniciar o desinstalador.");
+
+            await process.WaitForExitAsync();
+        }
+        finally
+        {
+            if (staging is not null)
+                TryDeleteDirectory(staging);
+        }
     }
 
     public void OpenLogs()
     {
-        Directory.CreateDirectory(GuardPaths.InstallDirectory);
+        Directory.CreateDirectory(GuardPaths.DataDirectory);
 
         if (!File.Exists(GuardPaths.Log))
             File.WriteAllText(GuardPaths.Log, string.Empty);
@@ -314,7 +226,7 @@ Unregister-ScheduledTask `
 
     public void OpenDetections()
     {
-        Directory.CreateDirectory(GuardPaths.InstallDirectory);
+        Directory.CreateDirectory(GuardPaths.DataDirectory);
 
         if (!File.Exists(GuardPaths.Detections))
             File.WriteAllText(

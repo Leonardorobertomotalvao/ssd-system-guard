@@ -101,3 +101,12 @@ O SSD System Guard não possui telemetria e não envia a lista de arquivos, proc
 ## Licença
 
 MIT. Consulte [`LICENSE`](LICENSE).
+
+
+## Atualização de interface e múltiplas contas (v1.1.1)
+
+A partir da v1.1.1, a instalação administrada utiliza `%ProgramData%\SSDSystemGuard`, cria um atalho na Área de Trabalho Pública e registra uma tarefa de logon por grupo para iniciar o Guard em cada sessão local. O executável instalado usa `--background` para iniciar o monitor sem janela de console; `--panel` abre o painel avançado.
+
+A interface principal, o painel e os alertas são redimensionáveis, adaptam o número de colunas à largura disponível e permitem rolagem em telas pequenas. A inicialização do aplicativo principal usa DPI PerMonitorV2.
+
+**Limites e segurança:** esta ferramenta não é antivírus ou EDR. O monitor inicia **após o logon**, não antes de o Windows entrar na conta. Em contas sem privilégio administrativo, certas pastas protegidas do sistema podem impedir bloqueios por ACL; o aplicativo não contorna privilégios. Teste em outra conta e em notebook antes de distribuir. A proteção de downloads pode mover ou excluir arquivos conforme configuração.

@@ -4,15 +4,25 @@ $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
-$ConfigPath = Join-Path $Base "config.json"
-$StatePath = Join-Path $Base "state.json"
-$LogPath = Join-Path $Base "guard.log"
-$DetectionsPath = Join-Path $Base "detections.csv"
+$Base = Join-Path $env:ProgramData "SSDSystemGuard"
+$Data = Join-Path $Base "Data"
+
+try {
+    $script:CurrentSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+} catch {
+    $script:CurrentSid = "unknown"
+}
+
+$script:SidKey = $script:CurrentSid.Replace("-","_")
+$ConfigPath = Join-Path $Data "config.json"
+$StatePath = Join-Path $Data ("state-" + $script:SidKey + ".json")
+$LogPath = Join-Path $Data "guard.log"
+$DetectionsPath = Join-Path $Data "detections.csv"
 $PanelPath = Join-Path $Base "Panel.ps1"
-$StopFlag = Join-Path $Base "stop.flag"
-$TestRedFlag = Join-Path $Base "test_red.flag"
-$TestYellowFlag = Join-Path $Base "test_yellow.flag"
+$HostExe = Join-Path $Base "SSDSystemGuard.exe"
+$StopFlag = Join-Path $Data ("stop-" + $script:SidKey + ".flag")
+$TestRedFlag = Join-Path $Data ("test_red-" + $script:SidKey + ".flag")
+$TestYellowFlag = Join-Path $Data ("test_yellow-" + $script:SidKey + ".flag")
 $IconPath = Join-Path $Base "SSDSystemGuard.ico"
 $script:AppIcon = $null
 
@@ -22,13 +32,13 @@ if (Test-Path $IconPath) {
     } catch {}
 }
 
-New-Item -ItemType Directory -Path $Base -Force | Out-Null
+New-Item -ItemType Directory -Path $Data -Force | Out-Null
 
 # ---------------------------------------------------------------------
 # SINGLE INSTANCE
 # ---------------------------------------------------------------------
 try {
-    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value.Replace("-","_")
+    $sid = $script:SidKey
     $createdNew = $false
     $script:GuardMutex = [System.Threading.Mutex]::new(
         $true,
@@ -364,13 +374,19 @@ function Show-GuardAlert {
 
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "SSD System Guard"
-    $form.Width = 900
-    $form.Height = 570
+    $working = [System.Windows.Forms.Screen]::FromPoint(
+        [System.Windows.Forms.Cursor]::Position
+    ).WorkingArea
+    $form.Width = [Math]::Min(900,[Math]::Max(620,$working.Width - 30))
+    $form.Height = [Math]::Min(570,[Math]::Max(460,$working.Height - 30))
+    $form.MinimumSize = New-Object System.Drawing.Size(620,460)
     $form.StartPosition = "CenterScreen"
     $form.TopMost = $true
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-    $form.MinimizeBox = $false
+    $form.FormBorderStyle = "Sizable"
+    $form.MaximizeBox = $true
+    $form.MinimizeBox = $true
+    $form.AutoScroll = $true
+    $form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 
     if ($script:AppIcon) {
         $form.Icon = $script:AppIcon
@@ -509,9 +525,7 @@ function Show-GuardAlert {
     $panel.Height = 42
     $panel.Location = New-Object System.Drawing.Point(545,470)
     $panel.Add_Click({
-        Start-Process powershell.exe -ArgumentList (
-            "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PanelPath`""
-        )
+        Start-Process -FilePath $HostExe -ArgumentList "--panel"
         $form.Close()
     })
 
@@ -521,6 +535,77 @@ function Show-GuardAlert {
         $ok,$open,$kill,$panel
     ))
 
+    # Rebuild the popup with fluid columns. Old location/width assignments
+    # above are ignored once the controls enter the responsive layout.
+    $form.Controls.Clear()
+    $header.Dock = 'Top'
+    $header.Height = 110
+    $alertScroll = New-Object System.Windows.Forms.Panel
+    $alertScroll.Dock = 'Fill'
+    $alertScroll.AutoScroll = $true
+    $alertTable = New-Object System.Windows.Forms.TableLayoutPanel
+    $alertTable.Dock = 'Top'
+    $alertTable.AutoSize = $true
+    $alertTable.AutoSizeMode = 'GrowAndShrink'
+    $alertTable.Padding = New-Object System.Windows.Forms.Padding(16)
+    $alertTable.ColumnCount = 1
+    $alertTable.Margin = New-Object System.Windows.Forms.Padding(0)
+    [void]$alertTable.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent',100)))
+    $alertScroll.Controls.Add($alertTable)
+    foreach ($control in @($itemLabel,$itemBox,$pathLabel,$pathBox,
+                            $reasonLabel,$reasonBox,$actionLabel,$actionBox)) {
+        $control.Dock = 'Top'
+        $control.Margin = New-Object System.Windows.Forms.Padding(3,4,3,8)
+        if ($control -is [System.Windows.Forms.TextBox]) {
+            $control.Width = 0
+            if (-not $control.Multiline) { $control.Height = 26 }
+        }
+        $alertTable.Controls.Add($control)
+    }
+    $alertButtons = New-Object System.Windows.Forms.TableLayoutPanel
+    $alertButtons.Dock = 'Top'
+    $alertButtons.AutoSize = $true
+    $alertButtons.AutoSizeMode = 'GrowAndShrink'
+    $alertButtons.Margin = New-Object System.Windows.Forms.Padding(0,8,0,4)
+    $btns = @($ok,$open,$kill,$panel)
+    foreach ($button in $btns) {
+        $button.Dock = 'Fill'
+        $button.Height = 43
+        $button.Margin = New-Object System.Windows.Forms.Padding(3)
+    }
+    $alertTable.Controls.Add($alertButtons)
+    $form.Controls.Add($alertScroll)
+    $form.Controls.Add($header)
+    $form.MinimumSize = New-Object System.Drawing.Size(320,320)
+    $form.Width = [Math]::Min(900,[Math]::Max(330,$working.Width - 25))
+    $form.Height = [Math]::Min(610,[Math]::Max(340,$working.Height - 25))
+    $title.Font = New-Object System.Drawing.Font('Segoe UI',19,[System.Drawing.FontStyle]::Bold)
+    $script:AlertCols = 0
+    $adjustAlert = {
+        $available = [Math]::Max(230,$alertScroll.ClientSize.Width)
+        $alertTable.Width = $available
+        $subtitle.AutoSize = $false
+        $subtitle.Width = [Math]::Max(205,$form.ClientSize.Width - 46)
+        $subtitle.Height = 40
+        $cols = if($available -ge 730) {4} elseif($available -ge 460) {2} else {1}
+        if($cols -eq $script:AlertCols) { return }
+        $script:AlertCols = $cols
+        $alertButtons.SuspendLayout()
+        $alertButtons.Controls.Clear()
+        $alertButtons.ColumnStyles.Clear()
+        $alertButtons.RowStyles.Clear()
+        $alertButtons.ColumnCount = $cols
+        $alertButtons.RowCount = [int][Math]::Ceiling(4.0/$cols)
+        for($j=0; $j -lt $cols; $j++) {
+            [void]$alertButtons.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent',(100.0/$cols))))
+        }
+        for($j=0; $j -lt 4; $j++) {
+            $alertButtons.Controls.Add($btns[$j],($j % $cols),[int][Math]::Floor($j/$cols))
+        }
+        $alertButtons.ResumeLayout($true)
+    }
+    $alertScroll.Add_SizeChanged($adjustAlert)
+    $form.Add_Shown($adjustAlert)
     [void]$form.ShowDialog()
     $form.Dispose()
 }
@@ -542,13 +627,36 @@ function Get-UnderlyingExtension {
     return $ext
 }
 
+function Get-ProtectedDownloadFolders {
+    $folders = @()
+    $cfg = Get-GuardConfig
+
+    if ($cfg) {
+        foreach ($folder in @($cfg.ProtectedDownloadFolders)) {
+            if ($folder -and (Test-Path $folder)) {
+                $folders += [string]$folder
+            }
+        }
+    }
+
+    # Cada instância roda dentro da conta interativa que acabou de entrar.
+    # Assim o Downloads da conta atual é sempre protegido, mesmo que ela
+    # não existisse quando o Guard foi instalado.
+    $currentDownloads = Join-Path $env:USERPROFILE "Downloads"
+    if (Test-Path $currentDownloads) {
+        $folders += $currentDownloads
+    }
+
+    return @($folders | Sort-Object -Unique)
+}
+
 function Test-ProtectedDownloadPath {
     param([string]$Path)
 
     $cfg = Get-GuardConfig
     if (-not $cfg) { return $false }
 
-    foreach ($folder in @($cfg.ProtectedDownloadFolders)) {
+    foreach ($folder in @(Get-ProtectedDownloadFolders)) {
         if ($folder -and $Path.StartsWith(
             $folder,
             [System.StringComparison]::OrdinalIgnoreCase
@@ -732,7 +840,7 @@ function Setup-DownloadWatchers {
     $cfg = Get-GuardConfig
     $i = 0
 
-    foreach ($folder in @($cfg.ProtectedDownloadFolders)) {
+    foreach ($folder in @(Get-ProtectedDownloadFolders)) {
         if (-not $folder -or -not (Test-Path $folder)) { continue }
 
         try {
@@ -992,6 +1100,8 @@ function Add-GuardBlockedPath {
         $blocked += [pscustomobject]@{
             Path = $Path
             Type = $Type
+            Identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+            Sid = $script:CurrentSid
             Added = (Get-Date).ToString("o")
         }
 
@@ -1411,7 +1521,7 @@ function Invoke-ProcessScan {
 
         $isProtectedLocation = $false
 
-        foreach ($folder in @($cfg.ProtectedDownloadFolders)) {
+        foreach ($folder in @(Get-ProtectedDownloadFolders)) {
             if ($folder -and $path.StartsWith(
                 $folder,
                 [System.StringComparison]::OrdinalIgnoreCase
@@ -1512,9 +1622,7 @@ $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
 $itemPanel = $menu.Items.Add("Abrir painel")
 $itemPanel.Add_Click({
-    Start-Process powershell.exe -ArgumentList (
-        "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PanelPath`""
-    )
+    Start-Process -FilePath $HostExe -ArgumentList "--panel"
 })
 
 $itemPause = $menu.Items.Add("Pausar por 1 hora")
@@ -1549,9 +1657,7 @@ $itemExit.Add_Click({
 $notify.ContextMenuStrip = $menu
 
 $notify.Add_DoubleClick({
-    Start-Process powershell.exe -ArgumentList (
-        "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$PanelPath`""
-    )
+    Start-Process -FilePath $HostExe -ArgumentList "--panel"
 })
 
 # ---------------------------------------------------------------------

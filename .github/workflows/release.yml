@@ -21,6 +21,10 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Validate embedded PowerShell 5.1 scripts
+        shell: pwsh
+        run: ./scripts/validate-powershell.ps1
+
       - name: Publish
         shell: pwsh
         run: |

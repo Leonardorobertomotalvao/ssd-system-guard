@@ -4,15 +4,18 @@ $ErrorActionPreference = "SilentlyContinue"
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$Base = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
-$ConfigPath = Join-Path $Base "config.json"
-$StatePath = Join-Path $Base "state.json"
-$LogPath = Join-Path $Base "guard.log"
-$DetectionsPath = Join-Path $Base "detections.csv"
+$Base = Join-Path $env:ProgramData "SSDSystemGuard"
+$Data = Join-Path $Base "Data"
+try { $SidKey = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value.Replace("-","_") } catch { $SidKey = "unknown" }
+$ConfigPath = Join-Path $Data "config.json"
+$StatePath = Join-Path $Data ("state-" + $SidKey + ".json")
+$LogPath = Join-Path $Data "guard.log"
+$DetectionsPath = Join-Path $Data "detections.csv"
 $CorePath = Join-Path $Base "GuardCore.ps1"
-$StopFlag = Join-Path $Base "stop.flag"
-$TestRedFlag = Join-Path $Base "test_red.flag"
-$TestYellowFlag = Join-Path $Base "test_yellow.flag"
+$HostExe = Join-Path $Base "SSDSystemGuard.exe"
+$StopFlag = Join-Path $Data ("stop-" + $SidKey + ".flag")
+$TestRedFlag = Join-Path $Data ("test_red-" + $SidKey + ".flag")
+$TestYellowFlag = Join-Path $Data ("test_yellow-" + $SidKey + ".flag")
 $TaskName = "SSD System Guard"
 $IconPath = Join-Path $Base "SSDSystemGuard.ico"
 $script:AppIcon = $null
@@ -66,9 +69,7 @@ function Ensure-CoreRunning {
     } catch {}
 
     if (-not $running -and (Test-Path $CorePath)) {
-        Start-Process powershell.exe -ArgumentList (
-            "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$CorePath`""
-        ) -WindowStyle Hidden
+        Start-Process -FilePath $HostExe -ArgumentList "--background" -WindowStyle Hidden
     }
 }
 
@@ -133,11 +134,18 @@ function Get-Counts {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = "SSD System Guard"
-$form.Width = 810
-$form.Height = 720
+$working = [System.Windows.Forms.Screen]::FromPoint(
+    [System.Windows.Forms.Cursor]::Position
+).WorkingArea
+$form.Width = [Math]::Min(840,[Math]::Max(330,$working.Width - 24))
+$form.Height = [Math]::Min(740,[Math]::Max(310,$working.Height - 24))
+$form.MinimumSize = New-Object System.Drawing.Size(320,300)
 $form.StartPosition = "CenterScreen"
-$form.FormBorderStyle = "FixedDialog"
-$form.MaximizeBox = $false
+$form.FormBorderStyle = "Sizable"
+$form.MaximizeBox = $true
+$form.MinimizeBox = $true
+$form.AutoScroll = $true
+$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
 
 if ($script:AppIcon) {
     $form.Icon = $script:AppIcon
@@ -152,7 +160,7 @@ $title.AutoSize = $true
 $title.Location = New-Object System.Drawing.Point(28,20)
 
 $desc = New-Object System.Windows.Forms.Label
-$desc.Text = "Uma única proteção para downloads, Steam/Epic e executáveis portáteis no SSD C:."
+$desc.Text = "Proteção do SSD C: para todas as contas locais deste computador."
 $desc.Font = New-Object System.Drawing.Font("Segoe UI",10)
 $desc.AutoSize = $true
 $desc.Location = New-Object System.Drawing.Point(31,68)
@@ -479,12 +487,117 @@ $btnExit.Add_Click({
     "stop" | Set-Content $StopFlag -Encoding ASCII
 })
 
-$form.Controls.AddRange(@(
-    $title,$desc,$status,$summary,$checks,
+# DPI-aware, reflowing layout: one column on notebooks, two on large screens.
+# Existing click handlers above remain unchanged.
+$scroll = New-Object System.Windows.Forms.Panel
+$scroll.Dock = 'Fill'
+$scroll.AutoScroll = $true
+$form.Controls.Add($scroll)
+
+$content = New-Object System.Windows.Forms.TableLayoutPanel
+$content.Dock = 'Top'
+$content.AutoSize = $true
+$content.AutoSizeMode = 'GrowAndShrink'
+$content.ColumnCount = 1
+$content.Padding = New-Object System.Windows.Forms.Padding(16)
+$content.Margin = New-Object System.Windows.Forms.Padding(0)
+[void]$content.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent',100)))
+$scroll.Controls.Add($content)
+
+foreach($label in @($title,$desc,$status,$summary,$note)) {
+    $label.AutoSize = $true
+    $label.Dock = 'Top'
+    $label.Margin = New-Object System.Windows.Forms.Padding(3,6,3,10)
+}
+$title.Font = New-Object System.Drawing.Font('Segoe UI',19,[System.Drawing.FontStyle]::Bold)
+$checks.Dock = 'Top'
+$checks.Margin = New-Object System.Windows.Forms.Padding(2,10,2,12)
+
+$checkTable = New-Object System.Windows.Forms.TableLayoutPanel
+$checkTable.Dock = 'Fill'
+$checkTable.Padding = New-Object System.Windows.Forms.Padding(8,13,8,5)
+$checkTable.Margin = New-Object System.Windows.Forms.Padding(0)
+$checkTable.GrowStyle = 'AddRows'
+$checks.Controls.Clear()
+$checks.Controls.Add($checkTable)
+$checkControls = @($cbDownloads,$cbSteam,$cbEpic,$cbPortable,$cbUnknown,$btnSave)
+foreach($control in $checkControls) {
+    $control.Dock = 'Fill'
+    $control.AutoSize = $false
+    $control.Margin = New-Object System.Windows.Forms.Padding(4)
+}
+
+$actionTable = New-Object System.Windows.Forms.TableLayoutPanel
+$actionTable.Dock = 'Top'
+$actionTable.AutoSize = $true
+$actionTable.AutoSizeMode = 'GrowAndShrink'
+$actionTable.GrowStyle = 'AddRows'
+$actionTable.Margin = New-Object System.Windows.Forms.Padding(0)
+$actionControls = @(
     $btnOn,$btnOff,$btnPause,$btnUnblock,
     $btnTestRed,$btnTestYellow,$btnLog,$btnDetections,
-    $btnQuarantine,$btnBaseline,$btnFolder,$btnExit,$note
-))
+    $btnQuarantine,$btnBaseline,$btnFolder,$btnExit
+)
+foreach($button in $actionControls) {
+    $button.Dock = 'Fill'
+    $button.AutoSize = $false
+    $button.Margin = New-Object System.Windows.Forms.Padding(4,4,4,9)
+}
+$content.Controls.Add($title)
+$content.Controls.Add($desc)
+$content.Controls.Add($status)
+$content.Controls.Add($summary)
+$content.Controls.Add($checks)
+$content.Controls.Add($actionTable)
+$content.Controls.Add($note)
+$script:PreviousPanelColumns = 0
+
+function Arrange-ResponsiveGrid {
+    param(
+        [System.Windows.Forms.TableLayoutPanel]$Table,
+        [System.Windows.Forms.Control[]]$Children,
+        [int]$Columns,
+        [int]$RowHeight
+    )
+    $Table.SuspendLayout()
+    $Table.Controls.Clear()
+    $Table.ColumnStyles.Clear()
+    $Table.RowStyles.Clear()
+    $Table.ColumnCount = $Columns
+    $rows = [int][Math]::Ceiling($Children.Count / [double]$Columns)
+    $Table.RowCount = $rows
+    for($j=0; $j -lt $Columns; $j++) {
+        [void]$Table.ColumnStyles.Add((New-Object System.Windows.Forms.ColumnStyle('Percent',(100.0 / $Columns))))
+    }
+    for($j=0; $j -lt $rows; $j++) {
+        [void]$Table.RowStyles.Add((New-Object System.Windows.Forms.RowStyle('Absolute',$RowHeight)))
+    }
+    for($j=0; $j -lt $Children.Count; $j++) {
+        $Table.Controls.Add($Children[$j],($j % $Columns),[int][Math]::Floor($j/$Columns))
+    }
+    $Table.ResumeLayout($true)
+}
+
+function Update-ResponsivePanel {
+    $width = [Math]::Max(285,$scroll.ClientSize.Width)
+    $content.Width = $width
+    $innerWidth = [Math]::Max(245,$width - 42)
+    foreach($label in @($title,$desc,$status,$summary,$note)) {
+        $label.MaximumSize = New-Object System.Drawing.Size($innerWidth,0)
+    }
+    $cols = if($innerWidth -ge 680) { 2 } else { 1 }
+    if($cols -eq $script:PreviousPanelColumns) { return }
+    $script:PreviousPanelColumns = $cols
+    $factor = [Math]::Max(1.0, $form.DeviceDpi / 96.0)
+    $checkRow = [Math]::Round(43 * $factor)
+    $actionRow = [Math]::Round(51 * $factor)
+    $checks.Height = ([int][Math]::Ceiling($checkControls.Count / [double]$cols) * $checkRow) + [Math]::Round(40*$factor)
+    Arrange-ResponsiveGrid $checkTable $checkControls $cols $checkRow
+    Arrange-ResponsiveGrid $actionTable $actionControls $cols $actionRow
+}
+
+$scroll.Add_SizeChanged({ Update-ResponsivePanel })
+$form.Add_Shown({ Update-ResponsivePanel })
 
 Ensure-CoreRunning
 Refresh-UI
@@ -502,10 +615,4 @@ try {
 } catch {}
 
 
-$form.Add_FormClosed({
-    try {
-        if ($script:AppIcon) {
-            $script:AppIcon.Dispose()
-        }
-    } catch {}
-})
+try { if ($script:AppIcon) { $script:AppIcon.Dispose() } } catch {}
