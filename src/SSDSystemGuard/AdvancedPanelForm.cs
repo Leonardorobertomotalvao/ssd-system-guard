@@ -3,11 +3,6 @@ using System.Drawing;
 
 namespace SSDSystemGuard;
 
-/// <summary>
-/// Native .NET 8 advanced panel.
-/// This intentionally replaces the old PowerShell WinForms panel to avoid
-/// Windows PowerShell 5.1 dynamic-binder/UI exceptions.
-/// </summary>
 internal sealed class AdvancedPanelForm : Form
 {
     private readonly GuardManager _guard = new();
@@ -26,11 +21,10 @@ internal sealed class AdvancedPanelForm : Form
     private readonly System.Windows.Forms.Timer _timer = new();
 
     private bool _refreshing;
-    private int _buttonColumns;
 
     public AdvancedPanelForm()
     {
-        Text = "SSD System Guard";
+        Text = "SSD System Guard 1.2.1 - Painel nativo .NET 8";
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.Sizable;
@@ -39,10 +33,7 @@ internal sealed class AdvancedPanelForm : Form
         MinimumSize = new Size(390, 430);
         Font = new Font("Segoe UI", 9.5f);
 
-        try
-        {
-            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-        }
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
         catch { }
 
         var work = Screen.FromPoint(Cursor.Position).WorkingArea;
@@ -74,11 +65,21 @@ internal sealed class AdvancedPanelForm : Form
 
         var heading = new Label
         {
-            Text = "SSD SYSTEM GUARD",
+            Text = "SSD SYSTEM GUARD 1.2.1",
             Font = new Font("Segoe UI", 21, FontStyle.Bold),
             AutoSize = true,
             Dock = DockStyle.Top,
             Margin = new Padding(0, 0, 0, 7)
+        };
+
+        var nativeBadge = new Label
+        {
+            Text = "Painel: .NET 8 nativo (PowerShell não é usado para esta interface)",
+            Font = new Font("Segoe UI", 9, FontStyle.Bold),
+            ForeColor = Color.DarkSlateBlue,
+            AutoSize = true,
+            Dock = DockStyle.Top,
+            Margin = new Padding(0, 0, 0, 10)
         };
 
         var subtitle = new Label
@@ -178,12 +179,14 @@ internal sealed class AdvancedPanelForm : Form
         unblock.Click += async (_, _) => await SafeUiAsync(async () =>
         {
             await _guard.UnblockAllAsync();
+
             MessageBox.Show(
                 this,
                 "Os bloqueios de pasta registrados para esta conta foram removidos.",
                 "SSD System Guard",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
+
             RefreshUi();
         });
 
@@ -211,17 +214,21 @@ internal sealed class AdvancedPanelForm : Form
                     "Refazer base",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question) != DialogResult.Yes)
+            {
                 return;
+            }
 
             await SafeUiAsync(async () =>
             {
                 await _guard.RebuildBaselineAsync();
+
                 MessageBox.Show(
                     this,
                     "A base será recriada automaticamente pelo Guard.",
                     "SSD System Guard",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
+
                 RefreshUi();
             });
         };
@@ -255,15 +262,15 @@ internal sealed class AdvancedPanelForm : Form
         var note = new Label
         {
             Text =
-                "Steam e Epic podem abrir normalmente. O Guard bloqueia apenas novas " +
-                "instalações/downloads no C:. Fechar esta janela NÃO encerra a proteção; " +
-                "use DESATIVAR PROTEÇÃO para desligar o bloqueio.",
+                "Steam e Epic podem abrir normalmente. Fechar esta janela NÃO " +
+                "encerra a proteção; use DESATIVAR PROTEÇÃO para desligar o bloqueio.",
             AutoSize = true,
             Dock = DockStyle.Top,
             Margin = new Padding(0, 4, 0, 12)
         };
 
         content.Controls.Add(heading);
+        content.Controls.Add(nativeBadge);
         content.Controls.Add(subtitle);
         content.Controls.Add(_status);
         content.Controls.Add(_summary);
@@ -279,28 +286,29 @@ internal sealed class AdvancedPanelForm : Form
 
             content.Width = Math.Max(280, scroll.ClientSize.Width);
 
-            heading.MaximumSize = new Size(available, 0);
-            subtitle.MaximumSize = new Size(available, 0);
-            _status.MaximumSize = new Size(available, 0);
-            _summary.MaximumSize = new Size(available, 0);
-            note.MaximumSize = new Size(available, 0);
+            foreach (var label in new[]
+                     {
+                         heading, nativeBadge, subtitle, _status, _summary, note
+                     })
+            {
+                label.MaximumSize = new Size(available, 0);
+            }
 
             foreach (var check in new[]
                      {
                          _downloads, _steam, _epic, _portable, _unknown
                      })
             {
-                check.MaximumSize = new Size(Math.Max(230, available - 30), 0);
+                check.MaximumSize = new Size(
+                    Math.Max(230, available - 30),
+                    0);
             }
 
-            var cols = available >= (int)Math.Round(720.0 * DeviceDpi / 96.0)
-                ? 2
-                : 1;
+            var cols =
+                available >= (int)Math.Round(720.0 * DeviceDpi / 96.0)
+                    ? 2
+                    : 1;
 
-            if (cols == _buttonColumns)
-                return;
-
-            _buttonColumns = cols;
             var width = cols == 2
                 ? Math.Max(270, (available - 30) / 2)
                 : Math.Max(250, available - 12);
@@ -310,6 +318,7 @@ internal sealed class AdvancedPanelForm : Form
         }
 
         scroll.SizeChanged += (_, _) => ResizeLayout();
+
         Shown += (_, _) =>
         {
             ResizeLayout();
@@ -411,6 +420,7 @@ internal sealed class AdvancedPanelForm : Form
         catch (Exception ex)
         {
             WriteUiError("Ação do painel", ex);
+
             MessageBox.Show(
                 this,
                 ex.Message,
@@ -429,6 +439,7 @@ internal sealed class AdvancedPanelForm : Form
         catch (Exception ex)
         {
             WriteUiError("Ação assíncrona do painel", ex);
+
             MessageBox.Show(
                 this,
                 ex.Message,
@@ -443,8 +454,11 @@ internal sealed class AdvancedPanelForm : Form
         try
         {
             Directory.CreateDirectory(GuardPaths.DataDirectory);
+
             File.AppendAllText(
-                Path.Combine(GuardPaths.DataDirectory, "native_panel_errors.log"),
+                Path.Combine(
+                    GuardPaths.DataDirectory,
+                    "native_panel_errors.log"),
                 $"[{DateTimeOffset.Now:O}] {context}{Environment.NewLine}" +
                 ex +
                 Environment.NewLine +

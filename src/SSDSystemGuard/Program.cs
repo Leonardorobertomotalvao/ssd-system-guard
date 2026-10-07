@@ -5,7 +5,6 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        // Background protection remains PowerShell-based and console-less.
         if (args.Length == 1 && args[0] == "--background")
             return BackgroundHost.RunBackground(GuardPaths.GuardCore);
 

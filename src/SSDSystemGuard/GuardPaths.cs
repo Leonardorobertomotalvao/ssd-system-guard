@@ -25,6 +25,9 @@ internal static class GuardPaths
     public static string Detections =>
         Path.Combine(DataDirectory, "detections.csv");
 
+    public static string LegacyPanel =>
+        Path.Combine(InstallDirectory, "Panel.ps1");
+
     public static string CurrentSidKey
     {
         get

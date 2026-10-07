@@ -102,16 +102,31 @@ internal sealed class GuardManager
 
     public void OpenPanel()
     {
-        var exe = Path.Combine(
-            GuardPaths.InstallDirectory,
-            "SSDSystemGuard.exe");
+        // Always open the panel from the EXE the user is currently running.
+        // This prevents an old installed host from launching the legacy
+        // PowerShell Panel.ps1 after the user has downloaded a newer build.
+        var exe = Environment.ProcessPath;
+
+        if (string.IsNullOrWhiteSpace(exe) || !File.Exists(exe))
+        {
+            exe = Path.Combine(
+                GuardPaths.InstallDirectory,
+                "SSDSystemGuard.exe");
+        }
 
         if (!File.Exists(exe))
             throw new FileNotFoundException(
-                "O SSD System Guard instalado não foi encontrado.",
+                "O executável do SSD System Guard não foi encontrado.",
                 exe);
 
-        StartInstalledHost("--panel");
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = exe,
+            Arguments = "--panel",
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WindowStyle = ProcessWindowStyle.Normal
+        });
     }
 
     public void StartGuard()
@@ -316,10 +331,7 @@ internal sealed class GuardManager
                 }
             }
         }
-        catch
-        {
-            // Counter display is informational only.
-        }
+        catch {}
 
         return (blocked, alerts);
     }

@@ -1,13 +1,10 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = 'Stop'
 
-Write-Host ("Validation host: {0} {1} / Edition={2}" -f
+Write-Host ("Validation host: {0} / Edition={1}" -f
     $PSVersionTable.PSVersion,
-    $PSVersionTable.PSVersion.Major,
     $PSVersionTable.PSEdition)
 
-# Embedded resources are executed by Windows PowerShell 5.1 in production.
-# Do not validate them only with pwsh / PowerShell 7.
 if (
     $PSVersionTable.PSVersion.Major -ne 5 -or
     $PSVersionTable.PSEdition -ne 'Desktop'
@@ -20,15 +17,32 @@ if (
 }
 
 $resourceRoot = Join-Path $PSScriptRoot '..\src\SSDSystemGuard\Resources'
-$files = Get-ChildItem -Path $resourceRoot -Filter '*.ps1' -File
+
+# Explicit runtime scripts only.
+# Panel.ps1 is intentionally NOT part of the v1.2.1 runtime.
+$names = @(
+    'GuardCore.ps1',
+    'GuardCommands.ps1',
+    'Install.ps1',
+    'Uninstall.ps1'
+)
+
 $failure = $false
 
-foreach ($file in $files) {
+foreach ($name in $names) {
+    $path = Join-Path $resourceRoot $name
+
+    if (-not (Test-Path -LiteralPath $path)) {
+        Write-Host "FAIL missing $name"
+        $failure = $true
+        continue
+    }
+
     $tokens = $null
     $parseErrors = $null
 
     [void][System.Management.Automation.Language.Parser]::ParseFile(
-        $file.FullName,
+        $path,
         [ref]$tokens,
         [ref]$parseErrors
     )
@@ -39,7 +53,7 @@ foreach ($file in $files) {
         foreach ($err in $parseErrors) {
             Write-Host (
                 "FAIL {0}: {1} @ line {2}, column {3}" -f
-                $file.Name,
+                $name,
                 $err.Message,
                 $err.Extent.StartLineNumber,
                 $err.Extent.StartColumnNumber
@@ -47,12 +61,12 @@ foreach ($file in $files) {
         }
     }
     else {
-        Write-Host "PASS $($file.Name)"
+        Write-Host "PASS $name"
     }
 }
 
 if ($failure) {
-    throw 'Windows PowerShell 5.1 syntax validation failed.'
+    throw 'Windows PowerShell 5.1 runtime-script validation failed.'
 }
 
-Write-Host 'All embedded PowerShell resources are valid for Windows PowerShell 5.1.'
+Write-Host 'PASS legacy Panel.ps1 excluded from runtime validation.'

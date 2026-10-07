@@ -1,0 +1,36 @@
+SSD System Guard v1.2.1
+
+ESTA VERSÃO NÃO USA POWERSHELL PARA O PAINEL.
+
+Depois de atualizar, o título deve mostrar:
+
+SSD System Guard 1.2.1 - Painel nativo .NET 8
+
+E dentro da janela:
+
+Painel: .NET 8 nativo (PowerShell não é usado para esta interface)
+
+Se essas frases não aparecerem, você ainda está executando uma versão antiga.
+
+Antes de publicar:
+1. extraia este ZIP sobre G:\ssd-system-guard
+2. execute .\APLICAR_MIGRACAO_v1.2.1.ps1
+3. git add -A
+4. git commit
+5. git fetch origin
+6. git rebase origin/main
+7. git push origin main
+8. espere Build VERDE
+9. só então crie tag v1.2.1
+
+Depois de instalar:
+- feche qualquer painel antigo;
+- clique INSTALAR / ATUALIZAR;
+- abra o painel;
+- confirme visualmente que aparece "Painel: .NET 8 nativo";
+- deixe aberto 60 segundos;
+- teste vermelho/amarelo;
+- redimensione/maximize/minimize.
+
+Se houver erro do painel nativo:
+C:\ProgramData\SSDSystemGuard\Data\native_panel_errors.log

@@ -1,26 +1,22 @@
 # Changelog
 
-## 1.2.0
+## 1.2.1
 
-### Painel avançado reescrito em C#/.NET 8
-- remove o painel WinForms em PowerShell do runtime;
-- `--panel` agora abre `AdvancedPanelForm`, compilado junto com o executável;
-- elimina a dependência do `PSEnumerableBinder`/binder dinâmico do Windows
-  PowerShell para a interface;
-- corrige de forma estrutural o popup repetitivo:
-  `Microsoft .NET Framework - Os tipos de argumento não correspondem`;
-- alertas vermelho e amarelo agora são janelas nativas .NET 8;
-- layout continua responsivo para notebook, 4K e DPI alto;
-- atualização visual continua em 5 segundos;
-- erros do painel nativo são gravados em `native_panel_errors.log`.
-
-### PowerShell permanece somente onde faz sentido
-- `GuardCore.ps1`: monitor/proteção em segundo plano;
-- `GuardCommands.ps1`: desbloqueio de ACL e reconstrução de baseline;
-- `Install.ps1` / `Uninstall.ps1`: instalação e remoção.
-
-### Migração
+### Correção estrutural definitiva do painel
+- remove o `Panel.ps1` do runtime;
+- `--panel` executa somente `AdvancedPanelForm` em C#/.NET 8;
+- `BackgroundHost` não possui mais `RunPanel`;
+- `ResourceInstaller` não extrai `Panel.ps1`;
+- o `.csproj` não usa mais wildcard `Resources\*.ps1`;
+- `GuardManager.OpenPanel()` abre o EXE que o usuário está executando no momento,
+  impedindo que um EXE novo chame um host instalado antigo;
+- durante a atualização, o instalador encerra processos antigos que estejam
+  rodando `Panel.ps1`;
 - o instalador remove `C:\ProgramData\SSDSystemGuard\Panel.ps1`;
-- o executável deixa de embutir o antigo Panel.ps1;
-- o painel avançado passa a fazer parte diretamente do `SSDSystemGuard.exe`.
+- o painel exibe claramente `Painel: .NET 8 nativo`;
+- alertas de teste também são nativos .NET;
+- PowerShell permanece apenas no núcleo, comandos de ACL e instalação.
 
+### Diagnóstico que motivou a mudança
+O stack trace real mostrou `PSEnumerableBinder` e `Timer.OnTick`, provando que o
+erro recorrente vinha da interface hospedada no Windows PowerShell 5.1.

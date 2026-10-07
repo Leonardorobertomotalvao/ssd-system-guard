@@ -11,7 +11,7 @@ internal sealed class NativeAlertForm : Form
         string path,
         string reason)
     {
-        Text = "SSD System Guard - Teste";
+        Text = "SSD System Guard 1.2.1 - Teste";
         StartPosition = FormStartPosition.CenterParent;
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.Sizable;
@@ -20,10 +20,7 @@ internal sealed class NativeAlertForm : Form
         MinimumSize = new Size(430, 370);
         Font = new Font("Segoe UI", 9.5f);
 
-        try
-        {
-            Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath);
-        }
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
         catch { }
 
         var work = Screen.FromPoint(Cursor.Position).WorkingArea;
@@ -165,11 +162,11 @@ internal sealed class NativeAlertForm : Form
     public static void ShowRed(IWin32Window owner)
     {
         using var form = new NativeAlertForm(
-            blocked: true,
-            category: "TESTE - jogo/download",
-            name: "Steam_Game_Test.exe",
-            path: @"C:\Users\Teste\Downloads\Steam_Game_Test.exe",
-            reason: "Alerta vermelho de teste do SSD System Guard.");
+            true,
+            "TESTE - jogo/download",
+            "Steam_Game_Test.exe",
+            @"C:\Users\Teste\Downloads\Steam_Game_Test.exe",
+            "Alerta vermelho de teste do SSD System Guard.");
 
         System.Media.SystemSounds.Exclamation.Play();
         form.ShowDialog(owner);
@@ -178,11 +175,11 @@ internal sealed class NativeAlertForm : Form
     public static void ShowYellow(IWin32Window owner)
     {
         using var form = new NativeAlertForm(
-            blocked: false,
-            category: "TESTE - aplicativo desconhecido",
-            name: "Programa_Desconhecido.exe",
-            path: @"C:\Users\Teste\Downloads\Programa_Desconhecido.exe",
-            reason: "Alerta amarelo de teste do SSD System Guard.");
+            false,
+            "TESTE - aplicativo desconhecido",
+            "Programa_Desconhecido.exe",
+            @"C:\Users\Teste\Downloads\Programa_Desconhecido.exe",
+            "Alerta amarelo de teste do SSD System Guard.");
 
         System.Media.SystemSounds.Exclamation.Play();
         form.ShowDialog(owner);

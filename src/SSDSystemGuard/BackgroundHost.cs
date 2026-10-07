@@ -3,10 +3,6 @@ using System.Text;
 
 namespace SSDSystemGuard;
 
-/// <summary>
-/// Starts the PowerShell protection core without exposing a console.
-/// The advanced panel is native .NET 8 and no longer runs through PowerShell.
-/// </summary>
 internal static class BackgroundHost
 {
     public static int RunBackground(string script)
@@ -16,10 +12,7 @@ internal static class BackgroundHost
 
         try
         {
-            using var process = Process.Start(
-                CreatePowerShellStartInfo(script));
-
-            // Detach immediately; Task Scheduler/LaunchGuard supervises the core.
+            using var process = Process.Start(CreatePowerShellStartInfo(script));
             return process is null ? 3 : 0;
         }
         catch (Exception ex)
@@ -72,9 +65,6 @@ internal static class BackgroundHost
                 Environment.NewLine,
                 Encoding.UTF8);
         }
-        catch
-        {
-            // Diagnostics must never crash the Guard.
-        }
+        catch { }
     }
 }

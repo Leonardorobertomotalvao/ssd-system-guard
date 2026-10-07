@@ -125,7 +125,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Falha ao configurar ACL da pasta de dados." }
 
     Remove-Item $InstallResultPath -Force -ErrorAction SilentlyContinue
-    Write-InstallLog "Início da instalação machine-wide v1.2.0."
+    Write-InstallLog "Início da instalação machine-wide v1.2.1."
 
     if (-not (Test-Path $SourceCore) -or -not (Test-Path $SourceCommands) -or -not (Test-Path $SourceIcon) -or -not (Test-Path $AppExe -PathType Leaf)) {
         throw "Recursos essenciais do instalador não foram encontrados."
@@ -138,6 +138,30 @@ try {
         Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
             Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*" } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
+
+    # Kill the legacy PowerShell WinForms panel from old builds.
+    try {
+        Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
+            Where-Object {
+                $_.ProcessId -ne $PID -and
+                $_.CommandLine -like "*SSDSystemGuard*Panel.ps1*"
+            } |
+            ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+    } catch {}
+
+    # Kill old --panel hosts too. The main installer window is not --panel.
+    try {
+        Get-CimInstance Win32_Process -Filter "Name='SSDSystemGuard.exe'" |
+            Where-Object {
+                $_.CommandLine -and
+                $_.CommandLine -like "*--panel*"
+            } |
+            ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
     } catch {}
 
     try {
@@ -172,9 +196,10 @@ try {
     Copy-Item $SourceCommands $CommandsPath -Force
     Copy-Item $SourceIcon $IconPath -Force
 
-    # v1.2.0: the advanced panel is native .NET 8.
-    # Remove the old PowerShell WinForms panel so it cannot be launched again.
-    Remove-Item (Join-Path $Base "Panel.ps1") -Force -ErrorAction SilentlyContinue
+    # v1.2.1: legacy PowerShell UI is forbidden at runtime.
+    Remove-Item (Join-Path $Base "Panel.ps1") `
+        -Force `
+        -ErrorAction SilentlyContinue
     if (Test-Path $SourceUninstall) { Copy-Item $SourceUninstall (Join-Path $Base "Uninstall.ps1") -Force }
     Write-GuardLauncher
 
@@ -194,7 +219,7 @@ try {
     }
 
     $config=[ordered]@{
-        Version="1.2.0"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
+        Version="1.2.1"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
         DownloadProtection=if($oldCfg){[bool]$oldCfg.DownloadProtection}else{$true}
         SteamProtection=if($oldCfg){[bool]$oldCfg.SteamProtection}else{$true}
         EpicProtection=if($oldCfg){[bool]$oldCfg.EpicProtection}else{$true}
@@ -245,7 +270,7 @@ try {
     Remove-Item $LegacyDefinitive -Recurse -Force -ErrorAction SilentlyContinue
 
     Write-InstallResult $true "Instalação para todas as contas concluída com sucesso."
-    Write-InstallLog "Instalação v1.2.0 concluída."
+    Write-InstallLog "Instalação v1.2.1 concluída."
     exit 0
 }
 catch {

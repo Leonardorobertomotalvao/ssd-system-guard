@@ -51,14 +51,15 @@ function Remove-GuardAcl {
     }
 
     if ([string]::IsNullOrWhiteSpace($Identity)) {
-        $Identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+        $Identity =
+            [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     }
 
     try {
         $acl = Get-Acl -LiteralPath $Path
         $changed = $false
 
-        foreach ($rule in $acl.Access) {
+        foreach ($rule in @($acl.Access)) {
             if (
                 $rule.IdentityReference.Value -eq $Identity -and
                 $rule.AccessControlType -eq
@@ -73,10 +74,7 @@ function Remove-GuardAcl {
             Set-Acl -LiteralPath $Path -AclObject $acl
         }
     }
-    catch {
-        # Continue with the remaining paths. The caller can inspect exit code
-        # only for fatal state/config failures.
-    }
+    catch {}
 }
 
 function Unblock-StatePaths {
@@ -86,21 +84,19 @@ function Unblock-StatePaths {
         return
     }
 
-    if ($null -ne $State.BlockedPaths) {
-        foreach ($item in $State.BlockedPaths) {
-            if ($null -eq $item) {
-                continue
-            }
-
-            $path = [string]$item.Path
-            $identity = ""
-
-            if ($null -ne $item.PSObject.Properties["Identity"]) {
-                $identity = [string]$item.Identity
-            }
-
-            Remove-GuardAcl -Path $path -Identity $identity
+    foreach ($item in @($State.BlockedPaths)) {
+        if ($null -eq $item) {
+            continue
         }
+
+        $path = [string]$item.Path
+        $identity = ""
+
+        if ($null -ne $item.PSObject.Properties["Identity"]) {
+            $identity = [string]$item.Identity
+        }
+
+        Remove-GuardAcl -Path $path -Identity $identity
     }
 
     $State.BlockedPaths = @()
@@ -130,9 +126,12 @@ catch {
         New-Item -ItemType Directory -Path $Data -Force | Out-Null
         Add-Content `
             -LiteralPath (Join-Path $Data "commands_errors.log") `
-            -Value ("[{0}] {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $_.Exception.ToString()) `
+            -Value ("[{0}] {1}" -f `
+                (Get-Date -Format "yyyy-MM-dd HH:mm:ss"),
+                $_.Exception.ToString()) `
             -Encoding UTF8
-    } catch {}
+    }
+    catch {}
 
     exit 1
 }
