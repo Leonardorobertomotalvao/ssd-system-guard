@@ -7,6 +7,41 @@ $ErrorActionPreference = "Stop"
 # PowerShell wildcard patterns treat [text] as a character class, so a literal
 # marker such as "return [pscustomobject]" can become a false negative with -like.
 
+function Assert-ContainsLiteral {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Text,
+
+        [Parameter(Mandatory=$true)]
+        [string]$Marker,
+
+        [Parameter(Mandatory=$true)]
+        [string]$ErrorMessage
+    )
+
+    if (-not $Text.Contains($Marker)) {
+        throw $ErrorMessage
+    }
+}
+
+# Self-test do próprio validador.
+# Se isso falhar, o CI está interpretando marcadores literais incorretamente.
+$selfTestText = 'alpha [pscustomobject] $StopFlag omega'
+
+Assert-ContainsLiteral `
+    -Text $selfTestText `
+    -Marker '[pscustomobject]' `
+    -ErrorMessage 'quality-check self-test failed for brackets.'
+
+Assert-ContainsLiteral `
+    -Text $selfTestText `
+    -Marker '$StopFlag' `
+    -ErrorMessage 'quality-check self-test failed for dollar-sign literal.'
+
+if ($selfTestText.Contains('$DoesNotExist')) {
+    throw 'quality-check self-test produced an impossible positive match.'
+}
+
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root "src\SSDSystemGuard\SSDSystemGuard.csproj"
 $resources = Join-Path $root "src\SSDSystemGuard\Resources"
@@ -73,6 +108,7 @@ if (-not $hostText.Contains("RunBackground") -or
     throw "BackgroundHost.cs está incompleto."
 }
 
+Write-Host "PASS self-test de marcadores literais"
 Write-Host "PASS arquivos obrigatórios"
 Write-Host "PASS versão consistente: $version"
 Write-Host "PASS marcadores críticos do GuardCore"
@@ -102,7 +138,7 @@ foreach ($marker in @(
     "MultipleInstances IgnoreNew",
     "LaunchGuard.vbs"
 )) {
-    if ($installText -notlike "*$marker*") {
+    if (-not $installText.Contains([string]$marker)) {
         throw "Install.ps1 perdeu auto-recuperação: $marker"
     }
 }
@@ -111,7 +147,7 @@ if ($guardText.Contains("Encerrar até o próximo login")) {
     throw "GuardCore.ps1 voltou a expor encerramento pelo tray."
 }
 
-if ($guardText.Contains("$StopFlag")) {
+if ($guardText.Contains('$StopFlag')) {
     throw "GuardCore.ps1 voltou a usar StopFlag."
 }
 

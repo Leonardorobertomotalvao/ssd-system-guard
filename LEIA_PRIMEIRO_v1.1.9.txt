@@ -1,0 +1,34 @@
+SSD System Guard v1.1.9 - CORREÇÃO DO QUALITY CHECK
+
+Erro anterior:
+GuardCore.ps1 voltou a usar StopFlag.
+
+Causa real:
+O quality-check.ps1 usava:
+
+    $guardText.Contains("$StopFlag")
+
+Como $StopFlag não existe no processo do validador, PowerShell expandia essa
+variável para uma string vazia. Qualquer string contém a string vazia, então
+a condição sempre retornava True.
+
+Correção:
+
+    $guardText.Contains('$StopFlag')
+
+Agora o texto é procurado literalmente.
+
+Também foram adicionados testes internos do próprio quality-check para impedir
+novos falsos positivos envolvendo:
+- [colchetes]
+- $variáveis literais
+- marcadores inexistentes
+
+Após aplicar:
+1. git add .
+2. git commit
+3. git fetch origin
+4. git rebase origin/main
+5. git push origin main
+6. aguardar Build verde
+7. somente então criar a tag v1.1.9
