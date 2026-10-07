@@ -1,0 +1,45 @@
+SSD System Guard - SEO / Google Search
+
+Objetivo:
+Fazer a homepage oficial ser entendida pelos mecanismos de busca como a
+principal página do projeto:
+
+https://leonardorobertomotalvao.github.io/ssd-system-guard/
+
+Arquivos:
+- APLICAR_SEO_SITE.ps1
+- SEO_HEAD.html
+- sitemap.xml
+
+Como aplicar:
+
+1. Extraia este ZIP em qualquer pasta.
+2. PowerShell:
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\APLICAR_SEO_SITE.ps1" -Repo "G:\ssd-system-guard"
+
+3. Entre no repo:
+
+cd "G:\ssd-system-guard"
+
+4. Confira:
+git diff
+
+5. Publique:
+git add -A
+git commit -m "Improve official site SEO and search indexing"
+git push origin main
+
+Depois:
+- aguarde GitHub Pages terminar o deploy;
+- abra Google Search Console;
+- adicione a propriedade URL-prefix:
+  https://leonardorobertomotalvao.github.io/ssd-system-guard/
+- use Inspeção de URL;
+- solicite indexação da homepage;
+- envie:
+  https://leonardorobertomotalvao.github.io/ssd-system-guard/sitemap.xml
+
+Observação:
+O Google decide a ordem dos resultados. SEO/canonical/sitemap melhoram os
+sinais, mas não existe garantia de posição #1 imediata.
