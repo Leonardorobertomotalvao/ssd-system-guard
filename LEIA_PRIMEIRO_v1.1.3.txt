@@ -1,0 +1,12 @@
+SSD System Guard v1.1.3 - correção dos alertas de teste
+
+Aplicar por cima da v1.1.2.
+
+Teste:
+1. Abra o painel avançado.
+2. Clique em "Testar alerta vermelho".
+3. Deve abrir imediatamente uma janela BLOQUEADO em vermelho.
+4. Feche e clique em "Testar alerta amarelo".
+5. Deve abrir imediatamente uma janela SUSPEITO / REQUER VALIDAÇÃO em amarelo.
+
+Os testes são apenas visuais e não alteram arquivos reais.

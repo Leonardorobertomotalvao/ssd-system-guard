@@ -199,6 +199,217 @@ public static class SSDGuardDpi {
         return $button
     }
 
+    function Show-PanelTestAlert {
+        param(
+            [ValidateSet("Red","Yellow")]
+            [string]$Kind
+        )
+
+        $isRed = $Kind -eq "Red"
+
+        $testForm = New-Object System.Windows.Forms.Form
+        $testForm.Text = "SSD System Guard - Teste"
+        $testForm.StartPosition = "CenterParent"
+        $testForm.FormBorderStyle = "Sizable"
+        $testForm.MinimizeBox = $true
+        $testForm.MaximizeBox = $true
+        $testForm.MinimumSize = New-Object System.Drawing.Size(420,360)
+        $testForm.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::Dpi
+        $testForm.TopMost = $true
+
+        $workingArea = [System.Windows.Forms.Screen]::FromControl($form).WorkingArea
+        $testForm.Width = [Math]::Min(760,[Math]::Max(460,$workingArea.Width - 100))
+        $testForm.Height = [Math]::Min(600,[Math]::Max(420,$workingArea.Height - 120))
+
+        if (Test-Path -LiteralPath $IconPath) {
+            try {
+                $testForm.Icon = New-Object System.Drawing.Icon($IconPath)
+            } catch {}
+        }
+
+        $root = New-Object System.Windows.Forms.TableLayoutPanel
+        $root.Dock = "Fill"
+        $root.AutoScroll = $true
+        $root.ColumnCount = 1
+        $root.RowCount = 4
+        $root.Padding = New-Object System.Windows.Forms.Padding(0)
+        [void]$root.ColumnStyles.Add(
+            (New-Object System.Windows.Forms.ColumnStyle(
+                [System.Windows.Forms.SizeType]::Percent,
+                100
+            ))
+        )
+        [void]$root.RowStyles.Add(
+            (New-Object System.Windows.Forms.RowStyle(
+                [System.Windows.Forms.SizeType]::AutoSize
+            ))
+        )
+        [void]$root.RowStyles.Add(
+            (New-Object System.Windows.Forms.RowStyle(
+                [System.Windows.Forms.SizeType]::Percent,
+                100
+            ))
+        )
+        [void]$root.RowStyles.Add(
+            (New-Object System.Windows.Forms.RowStyle(
+                [System.Windows.Forms.SizeType]::AutoSize
+            ))
+        )
+        [void]$root.RowStyles.Add(
+            (New-Object System.Windows.Forms.RowStyle(
+                [System.Windows.Forms.SizeType]::AutoSize
+            ))
+        )
+        $testForm.Controls.Add($root)
+
+        $header = New-Object System.Windows.Forms.Panel
+        $header.Dock = "Top"
+        $header.Height = 115
+
+        if ($isRed) {
+            $header.BackColor = [System.Drawing.Color]::FromArgb(160,25,25)
+            $statusText = "BLOQUEADO"
+            $categoryText = "TESTE - jogo/download"
+            $riskText = "ALTO"
+            $nameText = "Steam_Game_Test.exe"
+            $pathText = "C:\Users\Teste\Downloads\Steam_Game_Test.exe"
+            $reasonText = "Alerta vermelho de teste do SSD System Guard."
+        }
+        else {
+            $header.BackColor = [System.Drawing.Color]::FromArgb(190,120,0)
+            $statusText = "SUSPEITO / REQUER VALIDAÇÃO"
+            $categoryText = "TESTE - aplicativo desconhecido"
+            $riskText = "MÉDIO"
+            $nameText = "Programa_Desconhecido.exe"
+            $pathText = "C:\Users\Teste\Downloads\Programa_Desconhecido.exe"
+            $reasonText = "Alerta amarelo de teste do SSD System Guard."
+        }
+
+        $headerFlow = New-Object System.Windows.Forms.FlowLayoutPanel
+        $headerFlow.Dock = "Fill"
+        $headerFlow.FlowDirection = "TopDown"
+        $headerFlow.WrapContents = $false
+        $headerFlow.Padding = New-Object System.Windows.Forms.Padding(22,14,14,8)
+
+        $testTitle = New-Object System.Windows.Forms.Label
+        $testTitle.Text = $statusText
+        $testTitle.ForeColor = [System.Drawing.Color]::White
+        $testTitle.Font = New-Object System.Drawing.Font(
+            "Segoe UI",
+            19,
+            [System.Drawing.FontStyle]::Bold
+        )
+        $testTitle.AutoSize = $true
+
+        $testSubtitle = New-Object System.Windows.Forms.Label
+        $testSubtitle.Text = (
+            $categoryText +
+            "   |   Risco: " +
+            $riskText +
+            "   |   Origem: Teste interno"
+        )
+        $testSubtitle.ForeColor = [System.Drawing.Color]::White
+        $testSubtitle.Font = New-Object System.Drawing.Font("Segoe UI",9)
+        $testSubtitle.AutoSize = $true
+        $testSubtitle.MaximumSize = New-Object System.Drawing.Size(650,0)
+
+        [void]$headerFlow.Controls.Add($testTitle)
+        [void]$headerFlow.Controls.Add($testSubtitle)
+        $header.Controls.Add($headerFlow)
+
+        $details = New-Object System.Windows.Forms.TableLayoutPanel
+        $details.Dock = "Fill"
+        $details.AutoSize = $true
+        $details.AutoSizeMode = "GrowAndShrink"
+        $details.ColumnCount = 1
+        $details.Padding = New-Object System.Windows.Forms.Padding(22,16,22,12)
+        [void]$details.ColumnStyles.Add(
+            (New-Object System.Windows.Forms.ColumnStyle(
+                [System.Windows.Forms.SizeType]::Percent,
+                100
+            ))
+        )
+
+        function Add-TestDetail {
+            param(
+                [string]$Label,
+                [string]$Value,
+                [bool]$Multiline = $false
+            )
+
+            $lbl = New-Object System.Windows.Forms.Label
+            $lbl.Text = $Label
+            $lbl.Font = New-Object System.Drawing.Font(
+                "Segoe UI",
+                9,
+                [System.Drawing.FontStyle]::Bold
+            )
+            $lbl.AutoSize = $true
+            $lbl.Margin = New-Object System.Windows.Forms.Padding(3,7,3,3)
+            [void]$details.Controls.Add($lbl)
+
+            $box = New-Object System.Windows.Forms.TextBox
+            $box.Text = $Value
+            $box.ReadOnly = $true
+            $box.Dock = "Top"
+            $box.Multiline = $Multiline
+            if ($Multiline) {
+                $box.Height = 64
+                $box.ScrollBars = "Vertical"
+            }
+            $box.Margin = New-Object System.Windows.Forms.Padding(3,0,3,4)
+            [void]$details.Controls.Add($box)
+        }
+
+        Add-TestDetail "Item detectado:" $nameText
+        Add-TestDetail "Caminho:" $pathText
+        Add-TestDetail "Motivo:" $reasonText $true
+        Add-TestDetail "Ação:" "Nenhum arquivo real foi alterado. Este é apenas um teste visual." $true
+
+        $notice = New-Object System.Windows.Forms.Label
+        $notice.Text = "MODO DE TESTE — nenhuma proteção real foi acionada."
+        $notice.Font = New-Object System.Drawing.Font(
+            "Segoe UI",
+            9,
+            [System.Drawing.FontStyle]::Bold
+        )
+        $notice.AutoSize = $true
+        $notice.Dock = "Top"
+        $notice.Padding = New-Object System.Windows.Forms.Padding(22,4,22,4)
+
+        $buttons = New-Object System.Windows.Forms.FlowLayoutPanel
+        $buttons.Dock = "Top"
+        $buttons.AutoSize = $true
+        $buttons.FlowDirection = "RightToLeft"
+        $buttons.Padding = New-Object System.Windows.Forms.Padding(12,4,18,14)
+
+        $ok = New-Object System.Windows.Forms.Button
+        $ok.Text = "OK"
+        $ok.Width = 120
+        $ok.Height = 38
+        $ok.Add_Click({
+            $testForm.Close()
+        })
+        [void]$buttons.Controls.Add($ok)
+
+        [void]$root.Controls.Add($header,0,0)
+        [void]$root.Controls.Add($details,0,1)
+        [void]$root.Controls.Add($notice,0,2)
+        [void]$root.Controls.Add($buttons,0,3)
+
+        try {
+            [System.Media.SystemSounds]::Exclamation.Play()
+        } catch {}
+
+        [void]$testForm.ShowDialog($form)
+
+        try {
+            if ($testForm.Icon) {
+                $testForm.Icon.Dispose()
+            }
+        } catch {}
+    }
+
     # ---------------- UI ----------------
 
     $form = New-Object System.Windows.Forms.Form
@@ -567,17 +778,11 @@ public static class SSDGuardDpi {
     })
 
     $btnTestRed.Add_Click({
-        "test" |
-            Set-Content -LiteralPath $TestRedFlag -Encoding ASCII
-
-        Ensure-CoreRunning
+        Show-PanelTestAlert "Red"
     })
 
     $btnTestYellow.Add_Click({
-        "test" |
-            Set-Content -LiteralPath $TestYellowFlag -Encoding ASCII
-
-        Ensure-CoreRunning
+        Show-PanelTestAlert "Yellow"
     })
 
     $btnLog.Add_Click({
