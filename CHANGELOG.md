@@ -1,20 +1,17 @@
 # Changelog
 
-## 1.1.7
+## 1.1.8
 
-### Hotfix do painel
-- corrige o popup repetitivo do Microsoft .NET Framework:
-  `Os tipos de argumento não correspondem`;
-- eventos periódicos do WinForms agora são executados dentro de proteção
-  `try/catch`;
-- adiciona captura global de `Application.ThreadException`;
-- falhas passam a ser gravadas em `panel_errors.log` em vez de abrir diálogos
-  infinitos;
-- contadores de bloqueios/alertas deixam de retornar um array ambíguo e passam
-  a usar um objeto com propriedades `Blocked` e `Alerts`;
-- conversões de booleanos do JSON passam a ser explícitas;
-- criação dinâmica de `System.Drawing.Size` usa argumentos tipados;
-- timer visual alterado de 1,5 s para 5 s;
-- após três falhas consecutivas do refresh automático, somente o timer visual é
-  parado; a proteção em segundo plano não é afetada;
-- mantém toda a proteção contínua e auto-recuperação da v1.1.6.
+### CI / Release hotfix
+- corrige falso positivo em `Validate project invariants`;
+- o `quality-check.ps1` usava `-like` para procurar marcadores literais;
+- `[pscustomobject]` era interpretado como expressão wildcard pelo PowerShell;
+- verificações de presença passam a usar `String.Contains()`;
+- restaura documentos históricos que apareceram como removidos no commit anterior;
+- mantém integralmente as correções funcionais da v1.1.7.
+
+### Importante
+A falha vista no GitHub Actions da v1.1.7 não indicava erro de compilação do
+painel. A validação falhou antes do estágio `Publish` por causa do próprio
+script de qualidade.
+

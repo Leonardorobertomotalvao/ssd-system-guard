@@ -1,6 +1,12 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
+
+# IMPORTANT:
+# Marker checks below must use String.Contains(), not -like.
+# PowerShell wildcard patterns treat [text] as a character class, so a literal
+# marker such as "return [pscustomobject]" can become a false negative with -like.
+
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root "src\SSDSystemGuard\SSDSystemGuard.csproj"
 $resources = Join-Path $root "src\SSDSystemGuard\Resources"
@@ -45,7 +51,7 @@ $requiredGuardMarkers = @(
 )
 
 foreach ($marker in $requiredGuardMarkers) {
-    if ($guardText -notlike "*$marker*") {
+    if (-not $guardText.Contains([string]$marker)) {
         throw "GuardCore.ps1 perdeu função obrigatória: $marker"
     }
 }
@@ -56,14 +62,14 @@ foreach ($marker in @(
     'Show-PanelTestAlert "Yellow"',
     "panel_errors.log"
 )) {
-    if ($panelText -notlike "*$marker*") {
+    if (-not $panelText.Contains([string]$marker)) {
         throw "Panel.ps1 perdeu recurso obrigatório: $marker"
     }
 }
 
 $hostText = Get-Content (Join-Path $root "src\SSDSystemGuard\BackgroundHost.cs") -Raw
-if ($hostText -notlike "*RunBackground*" -or
-    $hostText -notlike "*RunPanel*") {
+if (-not $hostText.Contains("RunBackground") -or
+    -not $hostText.Contains("RunPanel")) {
     throw "BackgroundHost.cs está incompleto."
 }
 
@@ -83,7 +89,7 @@ foreach ($marker in @(
     "Write-GuardHeartbeat",
     "DOWNLOAD WATCHERS READY"
 )) {
-    if ($guardText -notlike "*$marker*") {
+    if (-not $guardText.Contains([string]$marker)) {
         throw "GuardCore.ps1 lost runtime diagnostic marker: $marker"
     }
 }
@@ -101,16 +107,16 @@ foreach ($marker in @(
     }
 }
 
-if ($guardText -like "*Encerrar até o próximo login*") {
+if ($guardText.Contains("Encerrar até o próximo login")) {
     throw "GuardCore.ps1 voltou a expor encerramento pelo tray."
 }
 
-if ($guardText -like "*`$StopFlag*") {
+if ($guardText.Contains("$StopFlag")) {
     throw "GuardCore.ps1 voltou a usar StopFlag."
 }
 
 $panelText = Get-Content (Join-Path $resources "Panel.ps1") -Raw
-if ($panelText -notlike "*Fechar painel (proteção continua)*") {
+if (-not $panelText.Contains("Fechar painel (proteção continua)")) {
     throw "Panel.ps1 perdeu fechamento seguro."
 }
 
@@ -127,12 +133,12 @@ foreach ($marker in @(
     "RefreshFailureCount",
     "return [pscustomobject]"
 )) {
-    if ($panelText -notlike "*$marker*") {
+    if (-not $panelText.Contains([string]$marker)) {
         throw "Panel.ps1 perdeu proteção contra exceção recorrente: $marker"
     }
 }
 
-if ($panelText -like "*return @(`$red,`$yellow)*") {
+if ($panelText.Contains('return @($red,$yellow)')) {
     throw "Panel.ps1 voltou a usar retorno de contadores em array ambíguo."
 }
 

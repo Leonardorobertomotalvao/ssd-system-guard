@@ -1,0 +1,20 @@
+SSD System Guard v1.1.8 - CORREÇÃO DO CI/RELEASE
+
+O GitHub Actions da v1.1.7 falhou em:
+Validate project invariants
+
+Mensagem:
+Panel.ps1 perdeu proteção contra exceção recorrente: return [pscustomobject]
+
+Causa:
+O quality-check usava -like para procurar o texto literal
+"return [pscustomobject]".
+
+No PowerShell, colchetes possuem significado especial em padrões -like.
+Portanto o teste gerava um falso negativo.
+
+Correção:
+As verificações de marcadores agora usam String.Contains(), que compara o texto
+literalmente.
+
+A v1.1.8 mantém a correção de popup .NET da v1.1.7.
