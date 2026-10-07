@@ -72,3 +72,18 @@ Write-Host "PASS versão consistente: $version"
 Write-Host "PASS marcadores críticos do GuardCore"
 Write-Host "PASS alertas de teste do painel"
 Write-Host "PASS host background/panel"
+
+# PowerShell 7 permits syntax combinations that can regress on Windows PowerShell 5.1.
+# The real parser gate runs separately, but keep this explicit regression guard too.
+if ($guardText -match '\)\.\s*(?:\r?\n)') {
+    throw "GuardCore.ps1 contains member access split after '.', unsafe for Windows PowerShell 5.1."
+}
+
+foreach ($marker in @(
+    "Write-GuardHeartbeat",
+    "DOWNLOAD WATCHERS READY"
+)) {
+    if ($guardText -notlike "*$marker*") {
+        throw "GuardCore.ps1 lost runtime diagnostic marker: $marker"
+    }
+}

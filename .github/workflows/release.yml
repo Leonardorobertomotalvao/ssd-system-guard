@@ -22,7 +22,7 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Validate embedded PowerShell 5.1 scripts
-        shell: pwsh
+        shell: powershell
         run: ./scripts/validate-powershell.ps1
 
       - name: Validate project invariants

@@ -31,6 +31,7 @@ $StopFlag = Join-Path $Data ("stop-" + $script:SidKey + ".flag")
 $TestRedFlag = Join-Path $Data ("test_red-" + $script:SidKey + ".flag")
 $TestYellowFlag = Join-Path $Data ("test_yellow-" + $script:SidKey + ".flag")
 $IconPath = Join-Path $Base "SSDSystemGuard.ico"
+$HeartbeatPath = Join-Path $Data ("heartbeat-" + $script:SidKey + ".txt")
 $script:AppIcon = $null
 
 if (Test-Path $IconPath) {
@@ -123,8 +124,8 @@ function Get-FileStamp {
             return [long]::MinValue
         }
 
-        return (Get-Item -LiteralPath $Path -ErrorAction Stop).
-            LastWriteTimeUtc.Ticks
+        $item = Get-Item -LiteralPath $Path -ErrorAction Stop
+        return $item.LastWriteTimeUtc.Ticks
     } catch {
         return [long]::MinValue
     }
@@ -277,6 +278,13 @@ function Invoke-GuardLogMaintenance {
 
         $tail |
             Set-Content -LiteralPath $Path -Encoding UTF8
+    } catch {}
+}
+
+function Write-GuardHeartbeat {
+    try {
+        (Get-Date).ToUniversalTime().ToString("o") |
+            Set-Content -LiteralPath $HeartbeatPath -Encoding ASCII
     } catch {}
 }
 
@@ -1905,6 +1913,12 @@ try {
 Invoke-GuardLogMaintenance $LogPath
 Initialize-Baseline
 Setup-DownloadWatchers
+Write-GuardLog (
+    "DOWNLOAD WATCHERS READY | Count={0} | Folders={1}" -f
+    @($script:Watchers).Count,
+    (@(Get-ProtectedDownloadFolders) -join "; ")
+)
+Write-GuardHeartbeat
 
 # ---------------------------------------------------------------------
 # SINGLE TRAY ICON
@@ -1965,9 +1979,16 @@ $notify.Add_DoubleClick({
 # ---------------------------------------------------------------------
 $fastTimer = New-Object System.Windows.Forms.Timer
 $fastTimer.Interval = 1500
+$script:LastHeartbeatWrite = [datetime]::MinValue
+
 $fastTimer.Add_Tick({
     Drain-DownloadEvents
     Retry-PendingFiles
+
+    if (((Get-Date) - $script:LastHeartbeatWrite).TotalSeconds -ge 20) {
+        Write-GuardHeartbeat
+        $script:LastHeartbeatWrite = Get-Date
+    }
 
     if (Test-Path $StopFlag) {
         Remove-Item $StopFlag -Force

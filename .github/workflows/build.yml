@@ -26,7 +26,7 @@ jobs:
         run: dotnet restore src/SSDSystemGuard/SSDSystemGuard.csproj
 
       - name: Validate embedded PowerShell 5.1 scripts
-        shell: pwsh
+        shell: powershell
         run: ./scripts/validate-powershell.ps1
 
       - name: Validate project invariants
