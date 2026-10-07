@@ -1,4 +1,15 @@
-# SSD System Guard
+﻿# SSD System Guard
+
+<!-- OFFICIAL-SITE-START -->
+> ## 🌐 Site oficial
+>
+> **SSD System Guard:** [https://leonardorobertomotalvao.github.io/ssd-system-guard/](https://leonardorobertomotalvao.github.io/ssd-system-guard/)
+>
+> Para conhecer o projeto e encontrar a versão recomendada, acesse primeiro o **site oficial**.  
+> Código-fonte e Releases continuam disponíveis neste repositório.
+<!-- OFFICIAL-SITE-END -->
+
+
 
 > **Atualização v1.2.0:** o painel avançado foi reescrito em C#/.NET 8. A interface não depende mais do WinForms hospedado pelo Windows PowerShell 5.1, eliminando a origem do erro `Os tipos de argumento não correspondem`.
 
@@ -410,3 +421,5 @@ MIT.
 Consulte:
 
 [`LICENSE`](LICENSE)
+
+
