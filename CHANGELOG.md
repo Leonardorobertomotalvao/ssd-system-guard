@@ -1,22 +1,25 @@
 # Changelog
 
-## 1.2.1
+## 1.2.3
 
-### Correção estrutural definitiva do painel
-- remove o `Panel.ps1` do runtime;
-- `--panel` executa somente `AdvancedPanelForm` em C#/.NET 8;
-- `BackgroundHost` não possui mais `RunPanel`;
-- `ResourceInstaller` não extrai `Panel.ps1`;
-- o `.csproj` não usa mais wildcard `Resources\*.ps1`;
-- `GuardManager.OpenPanel()` abre o EXE que o usuário está executando no momento,
-  impedindo que um EXE novo chame um host instalado antigo;
-- durante a atualização, o instalador encerra processos antigos que estejam
-  rodando `Panel.ps1`;
-- o instalador remove `C:\ProgramData\SSDSystemGuard\Panel.ps1`;
-- o painel exibe claramente `Painel: .NET 8 nativo`;
-- alertas de teste também são nativos .NET;
-- PowerShell permanece apenas no núcleo, comandos de ACL e instalação.
+### Correção da causa restante do popup .NET/PowerShell
+O stack trace real mostrou `PSEnumerableBinder`,
+`PSToObjectArrayBinder` e `System.Windows.Forms.Timer.OnTick`.
 
-### Diagnóstico que motivou a mudança
-O stack trace real mostrou `PSEnumerableBinder` e `Timer.OnTick`, provando que o
-erro recorrente vinha da interface hospedada no Windows PowerShell 5.1.
+O painel já era nativo .NET 8, porém o `GuardCore.ps1` continuava usando
+WinForms Timer para executar callbacks PowerShell.
+
+Também havia em `Get-ProcessSnapshot` um retorno de
+`System.Collections.Generic.List[object]` por `@($result)`, construção que pode
+acionar o binder dinâmico do Windows PowerShell 5.1.
+
+### Alterações
+- removidos todos os WinForms Timers do GuardCore;
+- removidos callbacks `.Add_Tick({...})`;
+- scheduler periódico agora é síncrono no thread principal;
+- `Application.DoEvents()` mantém apenas o tray responsivo;
+- cada etapa periódica possui `try/catch` independente;
+- `Get-ProcessSnapshot` agora retorna `$result.ToArray()`;
+- demais retornos `$result` não usam mais `@($result)`;
+- CI impede o retorno dessas construções;
+- painel continua 100% nativo .NET 8.

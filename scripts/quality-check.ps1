@@ -54,8 +54,8 @@ foreach ($path in $required) {
 [xml]$xml = Get-Content -LiteralPath $project -Raw
 $version = [string]$xml.Project.PropertyGroup.Version
 
-if ($version -ne "1.2.1") {
-    throw "Versão esperada 1.2.1; encontrada: $version"
+if ($version -ne "1.2.3") {
+    throw "Versão esperada 1.2.3; encontrada: $version"
 }
 
 $programText = Get-Content (Join-Path $src "Program.cs") -Raw
@@ -130,7 +130,7 @@ foreach ($marker in @(
     "GuardCommands.ps1",
     "*SSDSystemGuard*Panel.ps1*",
     'Remove-Item (Join-Path $Base "Panel.ps1")',
-    'Version="1.2.1"'
+    'Version="1.2.3"'
 )) {
     Assert-ContainsLiteral `
         -Text $installText `
@@ -145,3 +145,34 @@ Write-Host "PASS host PowerShell não possui RunPanel"
 Write-Host "PASS EXE atual abre o painel"
 Write-Host "PASS Panel.ps1 excluído do ResourceInstaller/csproj"
 Write-Host "PASS instalador mata e remove painel PowerShell legado"
+
+
+$guardText = Get-Content (Join-Path $resources "GuardCore.ps1") -Raw
+
+if ($guardText.Contains("New-Object System.Windows.Forms.Timer")) {
+    throw "GuardCore.ps1 voltou a criar WinForms Timer."
+}
+
+if ($guardText.Contains(".Add_Tick({")) {
+    throw "GuardCore.ps1 voltou a usar Timer.Add_Tick."
+}
+
+if ($guardText.Contains('return @($result)')) {
+    throw "GuardCore.ps1 voltou ao retorno que pode disparar PSEnumerableBinder."
+}
+
+foreach ($marker in @(
+    'return $result.ToArray()',
+    '[System.Windows.Forms.Application]::DoEvents()',
+    'Scheduler síncrono ativo; callbacks de timer removidos.',
+    'MAINLOOP ERROR | Invoke-ProcessScan'
+)) {
+    Assert-ContainsLiteral `
+        -Text $guardText `
+        -Marker $marker `
+        -ErrorMessage "GuardCore perdeu hotfix binder/scheduler: $marker"
+}
+
+Write-Host "PASS sem WinForms Timer callbacks no GuardCore"
+Write-Host "PASS Generic List convertida com ToArray"
+Write-Host "PASS scheduler síncrono do GuardCore"

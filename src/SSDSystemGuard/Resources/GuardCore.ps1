@@ -1096,7 +1096,7 @@ function Get-SteamLibrariesOnC {
     $script:SteamLibrariesCache = $result
     $script:SteamLibrariesCacheStamp = $cacheStamp
 
-    return @($result)
+    return $result
 }
 
 function Get-SteamInstalledAppIds {
@@ -1729,7 +1729,8 @@ function Get-ProcessSnapshot {
         }
     }
 
-    return @($result)
+    # Avoid Windows PowerShell 5.1 PSEnumerableBinder on Generic List[T].
+    return $result.ToArray()
 }
 
 function Invoke-ProcessScan {
@@ -1946,76 +1947,118 @@ $notify.Add_DoubleClick({
 })
 
 # ---------------------------------------------------------------------
-# TIMERS
+# MAIN LOOP / SCHEDULER
 # ---------------------------------------------------------------------
-$fastTimer = New-Object System.Windows.Forms.Timer
-$fastTimer.Interval = 1500
-$script:LastHeartbeatWrite = [datetime]::MinValue
+# Run periodic protection synchronously on the main PowerShell thread.
+# This avoids WinForms Timer.OnTick callbacks executing PowerShell scriptblocks.
+# DoEvents only pumps the NotifyIcon/tray Windows messages.
 
-$fastTimer.Add_Tick({
-    Drain-DownloadEvents
-    Retry-PendingFiles
+$lastFastRun = [datetime]::UtcNow.AddSeconds(-5)
+$lastGameRun = [datetime]::UtcNow.AddSeconds(-5)
+$lastProcessRun = [datetime]::UtcNow.AddSeconds(-5)
+$lastHeartbeatRun = [datetime]::UtcNow.AddSeconds(-30)
 
-    if (((Get-Date) - $script:LastHeartbeatWrite).TotalSeconds -ge 20) {
-        Write-GuardHeartbeat
-        $script:LastHeartbeatWrite = Get-Date
-    }
-
-})
-$fastTimer.Start()
-
-$gameTimer = New-Object System.Windows.Forms.Timer
-$gameTimer.Interval = 3000
-$gameTimer.Add_Tick({
-    Check-SteamDownloads
-    Check-EpicDownloads
-})
-$gameTimer.Start()
-
-$processTimer = New-Object System.Windows.Forms.Timer
-$processTimer.Interval = 5000
-$processTimer.Add_Tick({
-    Invoke-ProcessScan
-})
-$processTimer.Start()
-
-Write-GuardLog "SSD System Guard iniciado. Recuperação automática gerenciada pelo Agendador."
+Write-GuardLog "SSD System Guard iniciado. Scheduler síncrono ativo; callbacks de timer removidos."
 
 try {
-    [System.Windows.Forms.Application]::Run()
-} finally {
-    try { $fastTimer.Stop(); $fastTimer.Dispose() } catch {}
-    try { $gameTimer.Stop(); $gameTimer.Dispose() } catch {}
-    try { $processTimer.Stop(); $processTimer.Dispose() } catch {}
+    while ($true) {
+        try {
+            [System.Windows.Forms.Application]::DoEvents()
+        } catch {}
 
+        $now = [datetime]::UtcNow
+
+        if (($now - $lastFastRun).TotalMilliseconds -ge 1500) {
+            $lastFastRun = $now
+
+            try {
+                Drain-DownloadEvents
+            } catch {
+                Write-GuardLog (
+                    "MAINLOOP ERROR | Drain-DownloadEvents | " +
+                    $_.Exception.ToString()
+                )
+            }
+
+            try {
+                Retry-PendingFiles
+            } catch {
+                Write-GuardLog (
+                    "MAINLOOP ERROR | Retry-PendingFiles | " +
+                    $_.Exception.ToString()
+                )
+            }
+        }
+
+        if (($now - $lastGameRun).TotalMilliseconds -ge 3000) {
+            $lastGameRun = $now
+
+            try {
+                Check-SteamDownloads
+            } catch {
+                Write-GuardLog (
+                    "MAINLOOP ERROR | Check-SteamDownloads | " +
+                    $_.Exception.ToString()
+                )
+            }
+
+            try {
+                Check-EpicDownloads
+            } catch {
+                Write-GuardLog (
+                    "MAINLOOP ERROR | Check-EpicDownloads | " +
+                    $_.Exception.ToString()
+                )
+            }
+        }
+
+        if (($now - $lastProcessRun).TotalMilliseconds -ge 5000) {
+            $lastProcessRun = $now
+
+            try {
+                Invoke-ProcessScan
+            } catch {
+                Write-GuardLog (
+                    "MAINLOOP ERROR | Invoke-ProcessScan | " +
+                    $_.Exception.ToString()
+                )
+            }
+        }
+
+        if (($now - $lastHeartbeatRun).TotalSeconds -ge 20) {
+            $lastHeartbeatRun = $now
+
+            try {
+                Write-GuardHeartbeat
+            } catch {
+                Write-GuardLog (
+                    "MAINLOOP ERROR | Write-GuardHeartbeat | " +
+                    $_.Exception.ToString()
+                )
+            }
+        }
+
+        Start-Sleep -Milliseconds 100
+    }
+}
+finally {
     try {
         Get-EventSubscriber |
             Where-Object { $_.SourceIdentifier -like "SSDGD_*" } |
             Unregister-Event -Force
     } catch {}
 
-    foreach ($watcher in $script:Watchers) {
-        try {
+    try {
+        foreach ($watcher in @($script:Watchers)) {
             $watcher.EnableRaisingEvents = $false
             $watcher.Dispose()
-        } catch {}
-    }
+        }
+    } catch {}
 
     try {
         $notify.Visible = $false
         $notify.Dispose()
     } catch {}
 
-    try {
-        if ($script:AppIcon) {
-            $script:AppIcon.Dispose()
-        }
-    } catch {}
-
-    try {
-        $script:GuardMutex.ReleaseMutex()
-        $script:GuardMutex.Dispose()
-    } catch {}
-
-    Write-GuardLog "SSD System Guard encerrado."
+    try { $menu.Dispose() } catch {}
 }

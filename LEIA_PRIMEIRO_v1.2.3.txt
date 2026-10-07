@@ -1,0 +1,25 @@
+SSD System Guard v1.2.3
+
+O erro "Os tipos de argumento não correspondem" persistia porque o GuardCore
+em segundo plano ainda usava System.Windows.Forms.Timer.
+
+O relatório real mostrou:
+PSEnumerableBinder
+PSToObjectArrayBinder
+System.Windows.Forms.Timer.OnTick
+
+A v1.2.3 remove todos os callbacks Timer.Add_Tick do GuardCore e troca por um
+scheduler síncrono protegido por try/catch.
+
+Também troca:
+return @($result)
+
+por:
+return $result.ToArray()
+
+na lista genérica de processos.
+
+No guard.log deve aparecer:
+SSD System Guard iniciado. Scheduler síncrono ativo; callbacks de timer removidos.
+
+Teste o PC por pelo menos 2 minutos após atualizar.

@@ -24,7 +24,7 @@ internal sealed class AdvancedPanelForm : Form
 
     public AdvancedPanelForm()
     {
-        Text = "SSD System Guard 1.2.1 - Painel nativo .NET 8";
+        Text = "SSD System Guard 1.2.3 - Painel nativo .NET 8";
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.Sizable;
@@ -65,7 +65,7 @@ internal sealed class AdvancedPanelForm : Form
 
         var heading = new Label
         {
-            Text = "SSD SYSTEM GUARD 1.2.1",
+            Text = "SSD SYSTEM GUARD 1.2.3",
             Font = new Font("Segoe UI", 21, FontStyle.Bold),
             AutoSize = true,
             Dock = DockStyle.Top,

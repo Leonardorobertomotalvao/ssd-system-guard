@@ -11,7 +11,7 @@ internal sealed class NativeAlertForm : Form
         string path,
         string reason)
     {
-        Text = "SSD System Guard 1.2.1 - Teste";
+        Text = "SSD System Guard 1.2.3 - Teste";
         StartPosition = FormStartPosition.CenterParent;
         AutoScaleMode = AutoScaleMode.Dpi;
         FormBorderStyle = FormBorderStyle.Sizable;
