@@ -1,0 +1,26 @@
+SSD System Guard v1.1.7 - HOTFIX DO POPUP .NET
+
+Corrige:
+Microsoft .NET Framework
+"Os tipos de argumento não correspondem."
+
+O problema estava no painel WinForms. Eventos como Timer/SizeChanged podem
+executar fora do try/catch principal do script e gerar o diálogo padrão do
+.NET repetidamente.
+
+A v1.1.7:
+- captura erros dos eventos;
+- registra detalhes em:
+  C:\ProgramData\SSDSystemGuard\Data\panel_errors.log
+- impede loop de popup;
+- mantém o GuardCore em segundo plano independente do painel.
+
+Teste:
+1. instalar/atualizar;
+2. abrir painel;
+3. deixar aberto pelo menos 30 segundos;
+4. maximizar/minimizar/redimensionar;
+5. testar alerta vermelho/amarelo;
+6. confirmar que não aparece nenhum popup .NET.
+
+Se houver erro, envie o conteúdo de panel_errors.log.

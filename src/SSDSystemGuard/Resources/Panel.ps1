@@ -20,6 +20,35 @@ try {
     Add-Type -AssemblyName System.Windows.Forms
     Add-Type -AssemblyName System.Drawing
 
+    # Evita o diálogo genérico e repetitivo do .NET Framework quando uma
+    # exceção acontece dentro de um evento WinForms. O erro é registrado em
+    # panel_errors.log para diagnóstico.
+    [System.Windows.Forms.Application]::SetUnhandledExceptionMode(
+        [System.Windows.Forms.UnhandledExceptionMode]::CatchException
+    )
+
+    $script:PanelThreadExceptionHandler =
+        [System.Threading.ThreadExceptionEventHandler]{
+            param($sender,$eventArgs)
+
+            try {
+                $message = if ($eventArgs.Exception) {
+                    $eventArgs.Exception.ToString()
+                }
+                else {
+                    "ThreadException sem objeto Exception."
+                }
+
+                Write-PanelError ("WinForms ThreadException: " + $message)
+            } catch {}
+        }
+
+    try {
+        [System.Windows.Forms.Application]::add_ThreadException(
+            $script:PanelThreadExceptionHandler
+        )
+    } catch {}
+
     # Best effort DPI awareness for the PowerShell-hosted WinForms panel.
     try {
         Add-Type -TypeDefinition @"
@@ -166,21 +195,31 @@ public static class SSDGuardDpi {
 
         if (Test-Path -LiteralPath $DetectionsPath) {
             try {
-                $rows = @(Import-Csv -LiteralPath $DetectionsPath)
+                $rows = Import-Csv -LiteralPath $DetectionsPath
 
-                $red = @(
-                    $rows |
-                    Where-Object { $_.Status -like "*BLOQUEADO*" }
-                ).Count
+                foreach ($row in @($rows)) {
+                    $rowStatus = [string]$row.Status
 
-                $yellow = @(
-                    $rows |
-                    Where-Object { $_.Status -like "*SUSPEITO*" }
-                ).Count
-            } catch {}
+                    if ($rowStatus -like "*BLOQUEADO*") {
+                        $red++
+                    }
+
+                    if ($rowStatus -like "*SUSPEITO*") {
+                        $yellow++
+                    }
+                }
+            } catch {
+                Write-PanelError (
+                    "Get-Counts: " +
+                    $_.Exception.ToString()
+                )
+            }
         }
 
-        return @($red,$yellow)
+        return [pscustomobject]@{
+            Blocked = [int]$red
+            Alerts = [int]$yellow
+        }
     }
 
     function New-ActionButton {
@@ -409,6 +448,29 @@ public static class SSDGuardDpi {
         } catch {}
     }
 
+    function Invoke-PanelSafe {
+        param(
+            [string]$Context,
+            [scriptblock]$Action
+        )
+
+        try {
+            & $Action
+            return $true
+        }
+        catch {
+            Write-PanelError (
+                $Context +
+                ": " +
+                $_.Exception.ToString() +
+                [Environment]::NewLine +
+                $_.ScriptStackTrace
+            )
+
+            return $false
+        }
+    }
+
     # ---------------- UI ----------------
 
     $form = New-Object System.Windows.Forms.Form
@@ -616,7 +678,10 @@ public static class SSDGuardDpi {
             $summary,
             $note
         )) {
-            $label.MaximumSize = New-Object System.Drawing.Size($inner,0)
+            $label.MaximumSize = New-Object System.Drawing.Size -ArgumentList @(
+                [int]$inner,
+                [int]0
+            )
         }
 
         foreach ($checkBox in @(
@@ -626,9 +691,9 @@ public static class SSDGuardDpi {
             $cbPortable,
             $cbUnknown
         )) {
-            $checkBox.MaximumSize = New-Object System.Drawing.Size(
-                [Math]::Max(220,$inner - 25),
-                0
+            $checkBox.MaximumSize = New-Object System.Drawing.Size -ArgumentList @(
+                [int][Math]::Max(220,$inner - 25),
+                [int]0
             )
         }
 
@@ -667,17 +732,31 @@ public static class SSDGuardDpi {
 
         $paused = $false
 
-        if ($cfg.PauseUntil) {
-            try {
-                $until = [datetime]::Parse([string]$cfg.PauseUntil)
+        if ($null -ne $cfg.PauseUntil) {
+            $pauseText = [string]$cfg.PauseUntil
 
-                if ((Get-Date) -lt $until) {
-                    $paused = $true
+            if (-not [string]::IsNullOrWhiteSpace($pauseText)) {
+                try {
+                    $until = [datetime]::Parse($pauseText)
+
+                    if ((Get-Date) -lt $until) {
+                        $paused = $true
+                    }
+                } catch {
+                    Write-PanelError (
+                        "Refresh-UI PauseUntil: " +
+                        $_.Exception.Message
+                    )
                 }
-            } catch {}
+            }
         }
 
-        if (-not $cfg.Enabled) {
+        $enabled = $false
+        try {
+            $enabled = [System.Convert]::ToBoolean($cfg.Enabled)
+        } catch {}
+
+        if (-not $enabled) {
             $status.Text = "Status: DESATIVADO"
             $status.ForeColor = [System.Drawing.Color]::DarkRed
         }
@@ -692,25 +771,51 @@ public static class SSDGuardDpi {
 
         $counts = Get-Counts
 
-        $q = if ($cfg.QuarantinePath) {
-            [string]$cfg.QuarantinePath
-        }
-        else {
-            "sem quarentena externa"
+        $q = "sem quarentena externa"
+        if ($null -ne $cfg.QuarantinePath) {
+            $qCandidate = [string]$cfg.QuarantinePath
+
+            if (-not [string]::IsNullOrWhiteSpace($qCandidate)) {
+                $q = $qCandidate
+            }
         }
 
         $summary.Text = (
             "Bloqueios registrados: {0}   |   Alertas: {1}   |   Quarentena: {2}" -f
-            $counts[0],
-            $counts[1],
+            [int]$counts.Blocked,
+            [int]$counts.Alerts,
             $q
         )
 
-        $cbDownloads.Checked = [bool]$cfg.DownloadProtection
-        $cbSteam.Checked = [bool]$cfg.SteamProtection
-        $cbEpic.Checked = [bool]$cfg.EpicProtection
-        $cbPortable.Checked = [bool]$cfg.PortableGameProtection
-        $cbUnknown.Checked = [bool]$cfg.UnknownAppAlerts
+        try {
+            $cbDownloads.Checked = [System.Convert]::ToBoolean(
+                $cfg.DownloadProtection
+            )
+        } catch { $cbDownloads.Checked = $false }
+
+        try {
+            $cbSteam.Checked = [System.Convert]::ToBoolean(
+                $cfg.SteamProtection
+            )
+        } catch { $cbSteam.Checked = $false }
+
+        try {
+            $cbEpic.Checked = [System.Convert]::ToBoolean(
+                $cfg.EpicProtection
+            )
+        } catch { $cbEpic.Checked = $false }
+
+        try {
+            $cbPortable.Checked = [System.Convert]::ToBoolean(
+                $cfg.PortableGameProtection
+            )
+        } catch { $cbPortable.Checked = $false }
+
+        try {
+            $cbUnknown.Checked = [System.Convert]::ToBoolean(
+                $cfg.UnknownAppAlerts
+            )
+        } catch { $cbUnknown.Checked = $false }
     }
 
     $btnSave.Add_Click({
@@ -863,19 +968,44 @@ public static class SSDGuardDpi {
     })
 
     $scroll.Add_SizeChanged({
-        Update-ResponsiveLayout
+        [void](Invoke-PanelSafe "SizeChanged" {
+            Update-ResponsiveLayout
+        })
     })
 
     $form.Add_Shown({
-        Update-ResponsiveLayout
-        Ensure-CoreRunning
-        Refresh-UI
+        [void](Invoke-PanelSafe "Form.Shown" {
+            Update-ResponsiveLayout
+            Ensure-CoreRunning
+            Refresh-UI
+        })
     })
 
+    $script:RefreshFailureCount = 0
+
     $timer = New-Object System.Windows.Forms.Timer
-    $timer.Interval = 1500
+    $timer.Interval = 5000
     $timer.Add_Tick({
-        Refresh-UI
+        $ok = Invoke-PanelSafe "Timer.Refresh-UI" {
+            Refresh-UI
+        }
+
+        if ($ok) {
+            $script:RefreshFailureCount = 0
+        }
+        else {
+            $script:RefreshFailureCount++
+
+            # Evita um loop permanente caso uma máquina tenha um problema
+            # específico de WinForms/PowerShell. O painel continua utilizável.
+            if ($script:RefreshFailureCount -ge 3) {
+                $timer.Stop()
+                Write-PanelError (
+                    "Timer de atualização automática desativado após " +
+                    "3 falhas consecutivas."
+                )
+            }
+        }
     })
     $timer.Start()
 
@@ -889,6 +1019,14 @@ public static class SSDGuardDpi {
     try {
         if ($form.Icon) {
             $form.Icon.Dispose()
+        }
+    } catch {}
+
+    try {
+        if ($script:PanelThreadExceptionHandler) {
+            [System.Windows.Forms.Application]::remove_ThreadException(
+                $script:PanelThreadExceptionHandler
+            )
         }
     } catch {}
 

@@ -116,3 +116,24 @@ if ($panelText -notlike "*Fechar painel (proteção continua)*") {
 
 Write-Host "PASS auto-recuperação da tarefa"
 Write-Host "PASS fechamento de UI não encerra proteção"
+
+
+$panelText = Get-Content (Join-Path $resources "Panel.ps1") -Raw
+
+foreach ($marker in @(
+    "SetUnhandledExceptionMode",
+    "Invoke-PanelSafe",
+    "Timer.Refresh-UI",
+    "RefreshFailureCount",
+    "return [pscustomobject]"
+)) {
+    if ($panelText -notlike "*$marker*") {
+        throw "Panel.ps1 perdeu proteção contra exceção recorrente: $marker"
+    }
+}
+
+if ($panelText -like "*return @(`$red,`$yellow)*") {
+    throw "Panel.ps1 voltou a usar retorno de contadores em array ambíguo."
+}
+
+Write-Host "PASS proteção contra popup .NET recorrente no painel"

@@ -125,7 +125,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Falha ao configurar ACL da pasta de dados." }
 
     Remove-Item $InstallResultPath -Force -ErrorAction SilentlyContinue
-    Write-InstallLog "Início da instalação machine-wide v1.1.6."
+    Write-InstallLog "Início da instalação machine-wide v1.1.7."
 
     if (-not (Test-Path $SourceCore) -or -not (Test-Path $SourcePanel) -or -not (Test-Path $SourceIcon) -or -not (Test-Path $AppExe -PathType Leaf)) {
         throw "Recursos essenciais do instalador não foram encontrados."
@@ -190,7 +190,7 @@ try {
     }
 
     $config=[ordered]@{
-        Version="1.1.6"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
+        Version="1.1.7"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
         DownloadProtection=if($oldCfg){[bool]$oldCfg.DownloadProtection}else{$true}
         SteamProtection=if($oldCfg){[bool]$oldCfg.SteamProtection}else{$true}
         EpicProtection=if($oldCfg){[bool]$oldCfg.EpicProtection}else{$true}
@@ -241,7 +241,7 @@ try {
     Remove-Item $LegacyDefinitive -Recurse -Force -ErrorAction SilentlyContinue
 
     Write-InstallResult $true "Instalação para todas as contas concluída com sucesso."
-    Write-InstallLog "Instalação v1.1.6 concluída."
+    Write-InstallLog "Instalação v1.1.7 concluída."
     exit 0
 }
 catch {
