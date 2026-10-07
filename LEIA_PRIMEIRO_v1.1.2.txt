@@ -1,0 +1,14 @@
+SSD System Guard v1.1.2 - correção do painel
+
+Este patch deve ser aplicado por cima da v1.1.1.
+
+Teste principal:
+1. Instale/atualize o Guard.
+2. Clique em ABRIR PAINEL AVANÇADO.
+3. O painel deve abrir sem janela preta de console.
+4. Minimize, maximize e redimensione a janela.
+5. Teste em escala 100%, 150% e 200% quando possível.
+
+Se ainda houver falha, envie:
+C:\ProgramData\SSDSystemGuard\Data\panel_errors.log
+C:\ProgramData\SSDSystemGuard\Data\panel_host_errors.log

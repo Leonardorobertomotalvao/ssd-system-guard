@@ -1,13 +1,13 @@
 # Changelog
 
-## 1.1.1 — Multiusuário + interface adaptável + inicialização silenciosa
+## 1.1.2
 
-- Inclui as mudanças multiusuário da 1.1.0: instalação em ProgramData, atalho público, tarefa de logon por grupo e estado individual por SID.
-- A tarefa de logon executa o próprio `SSDSystemGuard.exe --background` (aplicação sem console), não `powershell.exe`.
-- `--panel` abre o painel avançado sem janela de console.
-- Reorganização da interface principal por largura e escala DPI.
-- Melhorias no painel e alertas para notebooks, escalas elevadas e 4K.
-- Atualização do instalador para copiar a interface WinExe para ProgramData e proteger os arquivos executáveis.
-- Mantém os recursos de bloqueio e a desinstalação multiusuário.
+- corrige o botão **ABRIR PAINEL AVANÇADO** que podia não exibir nenhuma janela;
+- separa o host silencioso do monitor do host visual do painel;
+- o painel não usa mais `-WindowStyle Hidden`;
+- painel reconstruído com layout responsivo desde a criação dos controles;
+- mantém minimização, maximização, redimensionamento e rolagem;
+- melhora suporte a notebook, 4K e escala/DPI alta;
+- adiciona `Data\panel_errors.log` e `Data\panel_host_errors.log` para diagnóstico;
+- se houver falha de inicialização do painel, o usuário recebe uma mensagem em vez de nada acontecer.
 
-**Importante:** a proteção é iniciada por sessão após o logon. Não é um serviço de Windows antes do login; tarefas não elevam contas comuns a administradores.

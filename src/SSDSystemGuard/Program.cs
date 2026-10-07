@@ -5,12 +5,12 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
-        // The same signed/packaged GUI binary is a windowless host when
-        // launched by Task Scheduler. No powershell.exe console is created.
+        // The same WinExe is used as a console-less host.
         if (args.Length == 1 && args[0] == "--background")
-            return BackgroundHost.Run(GuardPaths.GuardCore);
+            return BackgroundHost.RunBackground(GuardPaths.GuardCore);
+
         if (args.Length == 1 && args[0] == "--panel")
-            return BackgroundHost.Run(GuardPaths.Panel);
+            return BackgroundHost.RunPanel(GuardPaths.Panel);
 
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
