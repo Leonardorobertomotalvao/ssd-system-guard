@@ -143,12 +143,6 @@ internal sealed class GuardManager
         });
     }
 
-    public void StopUntilNextLogin()
-    {
-        Directory.CreateDirectory(GuardPaths.DataDirectory);
-        File.WriteAllText(GuardPaths.StopFlag, "stop");
-    }
-
     public void PauseOneHour()
     {
         UpdateConfig(cfg =>
@@ -166,7 +160,26 @@ internal sealed class GuardManager
             cfg["PauseUntil"] = null;
         });
 
-        StartGuard();
+        TryStartScheduledProtection();
+    }
+
+    private static void TryStartScheduledProtection()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/Run /TN \"{GuardPaths.ScheduledTaskName}\"",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden
+            });
+        }
+        catch
+        {
+            // A tarefa instalada continua responsável pela recuperação.
+        }
     }
 
     public void DisableProtection()

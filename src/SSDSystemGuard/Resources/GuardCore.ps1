@@ -27,9 +27,6 @@ $LogPath = Join-Path $Data "guard.log"
 $DetectionsPath = Join-Path $Data "detections.csv"
 $PanelPath = Join-Path $Base "Panel.ps1"
 $HostExe = Join-Path $Base "SSDSystemGuard.exe"
-$StopFlag = Join-Path $Data ("stop-" + $script:SidKey + ".flag")
-$TestRedFlag = Join-Path $Data ("test_red-" + $script:SidKey + ".flag")
-$TestYellowFlag = Join-Path $Data ("test_yellow-" + $script:SidKey + ".flag")
 $IconPath = Join-Path $Base "SSDSystemGuard.ico"
 $HeartbeatPath = Join-Path $Data ("heartbeat-" + $script:SidKey + ".txt")
 $script:AppIcon = $null
@@ -1934,39 +1931,13 @@ $notify.Visible = $true
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 
-$itemPanel = $menu.Items.Add("Abrir painel")
+$itemPanel = $menu.Items.Add("Abrir SSD System Guard")
 $itemPanel.Add_Click({
     Start-Process -FilePath $HostExe -ArgumentList "--panel"
 })
 
-$itemPause = $menu.Items.Add("Pausar por 1 hora")
-$itemPause.Add_Click({
-    $cfg = Get-GuardConfig
-
-    if ($cfg) {
-        $cfg.Enabled = $true
-        $cfg.PauseUntil = (Get-Date).AddHours(1).ToString("o")
-        Save-GuardConfig $cfg
-    }
-})
-
-$itemResume = $menu.Items.Add("Ativar / Retomar")
-$itemResume.Add_Click({
-    $cfg = Get-GuardConfig
-
-    if ($cfg) {
-        $cfg.Enabled = $true
-        $cfg.PauseUntil = $null
-        Save-GuardConfig $cfg
-    }
-})
-
-[void]$menu.Items.Add("-")
-
-$itemExit = $menu.Items.Add("Encerrar até o próximo login")
-$itemExit.Add_Click({
-    [System.Windows.Forms.Application]::Exit()
-})
+$itemStatus = $menu.Items.Add("Proteção executando em segundo plano")
+$itemStatus.Enabled = $false
 
 $notify.ContextMenuStrip = $menu
 
@@ -1990,12 +1961,6 @@ $fastTimer.Add_Tick({
         $script:LastHeartbeatWrite = Get-Date
     }
 
-    if (Test-Path $StopFlag) {
-        Remove-Item $StopFlag -Force
-        [System.Windows.Forms.Application]::Exit()
-        return
-    }
-
 })
 $fastTimer.Start()
 
@@ -2014,7 +1979,7 @@ $processTimer.Add_Tick({
 })
 $processTimer.Start()
 
-Write-GuardLog "SSD System Guard iniciado."
+Write-GuardLog "SSD System Guard iniciado. Recuperação automática gerenciada pelo Agendador."
 
 try {
     [System.Windows.Forms.Application]::Run()

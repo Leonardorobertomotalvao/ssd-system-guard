@@ -14,6 +14,7 @@ $DetectionsPath = Join-Path $Data "detections.csv"
 $InstallLogPath = Join-Path $Data "install.log"
 $InstallResultPath = Join-Path $Data "install.result.json"
 $TaskName = "SSD System Guard"
+$LauncherPath = Join-Path $Base "LaunchGuard.vbs"
 
 $LegacyBase = Join-Path $env:LOCALAPPDATA "SSDSystemGuard"
 $LegacyDefinitive = Join-Path $env:LOCALAPPDATA "SSDSystemGuardDefinitive"
@@ -63,15 +64,51 @@ function Remove-LegacyRules([string]$Folder) {
     }
 }
 
+function Write-GuardLauncher {
+    $vbs = @'
+Set shell = CreateObject("WScript.Shell")
+ps = shell.ExpandEnvironmentStrings("%SystemRoot%") & "\System32\WindowsPowerShell\v1.0\powershell.exe"
+core = shell.ExpandEnvironmentStrings("%ProgramData%") & "\SSDSystemGuard\GuardCore.ps1"
+cmd = """" & ps & """ -NoLogo -NoProfile -NonInteractive -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File """ & core & """"
+rc = shell.Run(cmd, 0, True)
+WScript.Quit rc
+'@
+
+    Set-Content -LiteralPath $LauncherPath -Value $vbs -Encoding ASCII
+}
+
 function Register-AllUsersTask {
-    # WinExe host starts PowerShell child with CreateNoWindow, avoiding black console.
-    $action = New-ScheduledTaskAction -Execute $InstalledExe -Argument "--background"
-    # UserId vazio = qualquer logon; GroupId Users = roda na sessão interativa
-    # de qualquer membro do grupo local Users.
+    $wscript = Join-Path $env:SystemRoot "System32\wscript.exe"
+
+    $action = New-ScheduledTaskAction `
+        -Execute $wscript `
+        -Argument ('"' + $LauncherPath + '"')
+
     $trigger = New-ScheduledTaskTrigger -AtLogOn
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero)
-    $principal = New-ScheduledTaskPrincipal -GroupId "S-1-5-32-545" -RunLevel Highest
-    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Description "SSD System Guard - proteção para todas as contas locais." -Force | Out-Null
+
+    $settings = New-ScheduledTaskSettingsSet `
+        -AllowStartIfOnBatteries `
+        -DontStopIfGoingOnBatteries `
+        -StartWhenAvailable `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) `
+        -MultipleInstances IgnoreNew `
+        -RestartCount 999 `
+        -RestartInterval (New-TimeSpan -Minutes 1) `
+        -Priority 8
+
+    $principal = New-ScheduledTaskPrincipal `
+        -GroupId "S-1-5-32-545" `
+        -RunLevel Highest
+
+    Register-ScheduledTask `
+        -TaskName $TaskName `
+        -Action $action `
+        -Trigger $trigger `
+        -Settings $settings `
+        -Principal $principal `
+        -Description "SSD System Guard - proteção contínua para todas as contas locais." `
+        -Force |
+        Out-Null
 }
 
 try {
@@ -88,7 +125,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Falha ao configurar ACL da pasta de dados." }
 
     Remove-Item $InstallResultPath -Force -ErrorAction SilentlyContinue
-    Write-InstallLog "Início da instalação machine-wide v1.1.5."
+    Write-InstallLog "Início da instalação machine-wide v1.1.6."
 
     if (-not (Test-Path $SourceCore) -or -not (Test-Path $SourcePanel) -or -not (Test-Path $SourceIcon) -or -not (Test-Path $AppExe -PathType Leaf)) {
         throw "Recursos essenciais do instalador não foram encontrados."
@@ -101,6 +138,17 @@ try {
         Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
             Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*" } |
             ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    } catch {}
+
+    try {
+        Get-CimInstance Win32_Process |
+            Where-Object {
+                $_.Name -match '^(wscript|cscript)\.exe$' -and
+                $_.CommandLine -like "*SSDSystemGuard*LaunchGuard.vbs*"
+            } |
+            ForEach-Object {
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
     } catch {}
 
     foreach($t in @("SSD System Guard","SSD System Guard Download Blocker","SSD System Guard Definitivo")) {
@@ -124,6 +172,7 @@ try {
     Copy-Item $SourcePanel $PanelPath -Force
     Copy-Item $SourceIcon $IconPath -Force
     if (Test-Path $SourceUninstall) { Copy-Item $SourceUninstall (Join-Path $Base "Uninstall.ps1") -Force }
+    Write-GuardLauncher
 
     $oldCfg=$null
     foreach($candidate in @((Join-Path $LegacyBase "config.json"),(Join-Path $LegacyDefinitive "config.json"),$ConfigPath)) {
@@ -141,7 +190,7 @@ try {
     }
 
     $config=[ordered]@{
-        Version="1.1.5"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
+        Version="1.1.6"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
         DownloadProtection=if($oldCfg){[bool]$oldCfg.DownloadProtection}else{$true}
         SteamProtection=if($oldCfg){[bool]$oldCfg.SteamProtection}else{$true}
         EpicProtection=if($oldCfg){[bool]$oldCfg.EpicProtection}else{$true}
@@ -169,11 +218,22 @@ try {
         (Join-Path $OldUserDesktop "SSD Guard Definitivo - Painel.lnk")
     )) { Remove-Item $oldLink -Force -ErrorAction SilentlyContinue }
 
-    Register-AllUsersTask
-    Write-InstallLog "Tarefa para qualquer usuário local registrada."
+    Get-ChildItem -LiteralPath $Data -Filter "stop-*.flag" -File -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
 
-    # Inicia já na conta que fez a instalação; próximas contas entram pela tarefa.
-    Start-Process -FilePath $InstalledExe -ArgumentList "--background" -WindowStyle Hidden
+    Register-AllUsersTask
+    Write-InstallLog "Tarefa com recuperação automática registrada."
+
+    try {
+        Start-ScheduledTask -TaskName $TaskName -ErrorAction Stop
+    } catch {
+        Write-InstallLog ("Aviso ao iniciar tarefa: " + $_.Exception.Message)
+        Start-Process `
+            -FilePath (Join-Path $env:SystemRoot "System32\wscript.exe") `
+            -ArgumentList ('"' + $LauncherPath + '"') `
+            -WindowStyle Hidden
+    }
+
     Start-Sleep -Milliseconds 900
 
     # Remove somente versões antigas por usuário após migrar/desbloquear.
@@ -181,7 +241,7 @@ try {
     Remove-Item $LegacyDefinitive -Recurse -Force -ErrorAction SilentlyContinue
 
     Write-InstallResult $true "Instalação para todas as contas concluída com sucesso."
-    Write-InstallLog "Instalação v1.1.5 concluída."
+    Write-InstallLog "Instalação v1.1.6 concluída."
     exit 0
 }
 catch {

@@ -32,10 +32,34 @@ function Remove-StateBlocks([string]$StatePath) {
 $quarantine=""
 if (Test-Path $ConfigPath) { try { $quarantine=[string](Get-Content $ConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json).QuarantinePath } catch {} }
 
+foreach($t in @(
+    "SSD System Guard",
+    "SSD System Guard Download Blocker",
+    "SSD System Guard Definitivo"
+)) {
+    Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
+}
+
 try {
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-        Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*" } |
-        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+        Where-Object {
+            $_.ProcessId -ne $PID -and
+            $_.CommandLine -like "*SSDSystemGuard*GuardCore.ps1*"
+        } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+} catch {}
+
+try {
+    Get-CimInstance Win32_Process |
+        Where-Object {
+            $_.Name -match '^(wscript|cscript)\.exe$' -and
+            $_.CommandLine -like "*SSDSystemGuard*LaunchGuard.vbs*"
+        } |
+        ForEach-Object {
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
 } catch {}
 
 # Termina hosts instalados que mantêm o executável aberto em outras sessões.
@@ -46,7 +70,6 @@ try {
 } catch {}
 Start-Sleep -Milliseconds 600
 foreach($state in @(Get-ChildItem $Data -Filter "state-*.json" -File -ErrorAction SilentlyContinue)) { Remove-StateBlocks $state.FullName }
-foreach($t in @("SSD System Guard","SSD System Guard Download Blocker","SSD System Guard Definitivo")) { Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue }
 Remove-Item $PanelLink -Force -ErrorAction SilentlyContinue
 
 $deleteQ=$false

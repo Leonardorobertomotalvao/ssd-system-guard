@@ -1,0 +1,23 @@
+SSD System Guard v1.1.6 - PROTEÇÃO CONTÍNUA
+
+Comportamento:
+- Fechar o aplicativo NÃO desliga o Guard.
+- Fechar o painel NÃO desliga o Guard.
+- Se o processo GuardCore for finalizado inesperadamente, o Agendador do Windows
+  tenta reiniciá-lo em até aproximadamente 1 minuto.
+- Para desligar o bloqueio normalmente, use DESATIVAR PROTEÇÃO dentro do app.
+- DESINSTALAR DO COMPUTADOR continua removendo tudo.
+
+Teste:
+1. Instale/atualize.
+2. Confirme Status ATIVO.
+3. Feche todas as janelas do Guard.
+4. Teste um download de risco.
+5. Finalize apenas o powershell.exe cujo CommandLine contém GuardCore.ps1.
+6. Aguarde até cerca de 1 minuto.
+7. Confirme que heartbeat-<SID>.txt voltou a atualizar e teste novo download.
+
+Observação:
+Um administrador do Windows continua podendo parar a tarefa agendada ou
+desinstalar o programa. Esta versão usa recuperação normal do Windows, não
+técnicas de anti-terminação.

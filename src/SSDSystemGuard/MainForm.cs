@@ -85,7 +85,7 @@ public sealed class MainForm : Form
             NewButton("ATIVAR / RETOMAR", (_, _) => { SafeAction(_guard.Resume); _ = RefreshStatusAsync(); }),
             NewButton("PAUSAR 1 HORA", (_, _) => { SafeAction(_guard.PauseOneHour); _ = RefreshStatusAsync(); }),
             NewButton("DESATIVAR PROTEÇÃO", (_, _) => { SafeAction(_guard.DisableProtection); _ = RefreshStatusAsync(); }),
-            NewButton("ENCERRAR NESTA CONTA", StopClicked),
+            NewButton("FECHAR JANELA (PROTEÇÃO CONTINUA)", (_, _) => Close()),
             NewButton("ABRIR LOG", (_, _) => SafeAction(_guard.OpenLogs)),
             NewButton("ABRIR DETECÇÕES", (_, _) => SafeAction(_guard.OpenDetections)),
             NewButton("ABRIR PASTA DO GUARD", (_, _) => ProcessHelper.OpenInExplorer(GuardPaths.InstallDirectory)),
@@ -154,7 +154,7 @@ public sealed class MainForm : Form
         {
             await _guard.InstallOrUpdateAsync(Handle);
             MessageBox.Show("SSD System Guard instalado para as contas locais deste PC. " +
-                "A proteção inicia na sessão de cada usuário após seu logon.",
+                "A proteção inicia após o logon e possui recuperação automática se o monitor encerrar.",
                 "SSD System Guard", MessageBoxButtons.OK, MessageBoxIcon.Information);
         }
         catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
@@ -163,13 +163,6 @@ public sealed class MainForm : Form
         }
         catch (Exception ex) { ShowError(ex); }
         finally { ToggleUi(true); await RefreshStatusAsync(); }
-    }
-
-    private void StopClicked(object? sender, EventArgs e)
-    {
-        SafeAction(_guard.StopUntilNextLogin);
-        MessageBox.Show("O Guard será encerrado nesta conta até o próximo logon. As outras sessões continuam independentes.",
-            "SSD System Guard", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
 
     private async void UninstallClicked(object? sender, EventArgs e)

@@ -46,8 +46,7 @@ public static class SSDGuardDpi {
     $DetectionsPath = Join-Path $Data "detections.csv"
     $CorePath = Join-Path $Base "GuardCore.ps1"
     $HostExe = Join-Path $Base "SSDSystemGuard.exe"
-    $StopFlag = Join-Path $Data ("stop-" + $SidKey + ".flag")
-    $TestRedFlag = Join-Path $Data ("test_red-" + $SidKey + ".flag")
+        $TestRedFlag = Join-Path $Data ("test_red-" + $SidKey + ".flag")
     $TestYellowFlag = Join-Path $Data ("test_yellow-" + $SidKey + ".flag")
     $IconPath = Join-Path $Base "SSDSystemGuard.ico"
 
@@ -560,7 +559,7 @@ public static class SSDGuardDpi {
     $btnQuarantine = New-ActionButton "Abrir quarentena"
     $btnBaseline = New-ActionButton "Refazer base Steam/Epic"
     $btnFolder = New-ActionButton "Abrir pasta do Guard"
-    $btnExit = New-ActionButton "Encerrar nesta conta"
+    $btnExit = New-ActionButton "Fechar painel (proteção continua)"
 
     $actionButtons = @(
         $btnOn,
@@ -584,8 +583,8 @@ public static class SSDGuardDpi {
     $note = New-Object System.Windows.Forms.Label
     $note.Text = (
         "Steam e Epic podem abrir normalmente. O Guard bloqueia apenas " +
-        "novas instalações/downloads no C:. Jogos já existentes entram " +
-        "na base inicial e não são bloqueados."
+        "novas instalações/downloads no C:. Fechar esta janela NÃO encerra " +
+        "a proteção; use DESATIVAR PROTEÇÃO para desligar o bloqueio."
     )
     $note.Font = New-Object System.Drawing.Font("Segoe UI",9)
     $note.AutoSize = $true
@@ -735,9 +734,6 @@ public static class SSDGuardDpi {
             $cfg.Enabled = $true
             $cfg.PauseUntil = $null
             Save-Cfg $cfg
-            Remove-Item -LiteralPath $StopFlag `
-                -Force `
-                -ErrorAction SilentlyContinue
             Ensure-CoreRunning
             Refresh-UI
         }
@@ -863,9 +859,6 @@ public static class SSDGuardDpi {
     })
 
     $btnExit.Add_Click({
-        "stop" |
-            Set-Content -LiteralPath $StopFlag -Encoding ASCII
-
         $form.Close()
     })
 

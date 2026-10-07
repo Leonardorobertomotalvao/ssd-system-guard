@@ -87,3 +87,32 @@ foreach ($marker in @(
         throw "GuardCore.ps1 lost runtime diagnostic marker: $marker"
     }
 }
+
+
+$installText = Get-Content (Join-Path $resources "Install.ps1") -Raw
+foreach ($marker in @(
+    "RestartCount 999",
+    "RestartInterval (New-TimeSpan -Minutes 1)",
+    "MultipleInstances IgnoreNew",
+    "LaunchGuard.vbs"
+)) {
+    if ($installText -notlike "*$marker*") {
+        throw "Install.ps1 perdeu auto-recuperação: $marker"
+    }
+}
+
+if ($guardText -like "*Encerrar até o próximo login*") {
+    throw "GuardCore.ps1 voltou a expor encerramento pelo tray."
+}
+
+if ($guardText -like "*`$StopFlag*") {
+    throw "GuardCore.ps1 voltou a usar StopFlag."
+}
+
+$panelText = Get-Content (Join-Path $resources "Panel.ps1") -Raw
+if ($panelText -notlike "*Fechar painel (proteção continua)*") {
+    throw "Panel.ps1 perdeu fechamento seguro."
+}
+
+Write-Host "PASS auto-recuperação da tarefa"
+Write-Host "PASS fechamento de UI não encerra proteção"
