@@ -6,7 +6,7 @@ $ErrorActionPreference = "Stop"
 $Base = Join-Path $env:ProgramData "SSDSystemGuard"
 $Data = Join-Path $Base "Data"
 $CorePath = Join-Path $Base "GuardCore.ps1"
-$PanelPath = Join-Path $Base "Panel.ps1"
+$CommandsPath = Join-Path $Base "GuardCommands.ps1"
 $IconPath = Join-Path $Base "SSDSystemGuard.ico"
 $ConfigPath = Join-Path $Data "config.json"
 $LogPath = Join-Path $Data "guard.log"
@@ -26,7 +26,7 @@ $OldUserDesktop = [Environment]::GetFolderPath("Desktop")
 $SourceDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $SourceCore = Join-Path $SourceDir "GuardCore.ps1"
 $InstalledExe = Join-Path $Base "SSDSystemGuard.exe"
-$SourcePanel = Join-Path $SourceDir "Panel.ps1"
+$SourceCommands = Join-Path $SourceDir "GuardCommands.ps1"
 $SourceIcon = Join-Path $SourceDir "SSDSystemGuard.ico"
 $SourceUninstall = Join-Path $SourceDir "Uninstall.ps1"
 
@@ -125,9 +125,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Falha ao configurar ACL da pasta de dados." }
 
     Remove-Item $InstallResultPath -Force -ErrorAction SilentlyContinue
-    Write-InstallLog "Início da instalação machine-wide v1.1.9."
+    Write-InstallLog "Início da instalação machine-wide v1.2.0."
 
-    if (-not (Test-Path $SourceCore) -or -not (Test-Path $SourcePanel) -or -not (Test-Path $SourceIcon) -or -not (Test-Path $AppExe -PathType Leaf)) {
+    if (-not (Test-Path $SourceCore) -or -not (Test-Path $SourceCommands) -or -not (Test-Path $SourceIcon) -or -not (Test-Path $AppExe -PathType Leaf)) {
         throw "Recursos essenciais do instalador não foram encontrados."
     }
 
@@ -169,8 +169,12 @@ try {
         Copy-Item -LiteralPath $AppExe -Destination $InstalledExe -Force -ErrorAction Stop
     }
     Copy-Item $SourceCore $CorePath -Force
-    Copy-Item $SourcePanel $PanelPath -Force
+    Copy-Item $SourceCommands $CommandsPath -Force
     Copy-Item $SourceIcon $IconPath -Force
+
+    # v1.2.0: the advanced panel is native .NET 8.
+    # Remove the old PowerShell WinForms panel so it cannot be launched again.
+    Remove-Item (Join-Path $Base "Panel.ps1") -Force -ErrorAction SilentlyContinue
     if (Test-Path $SourceUninstall) { Copy-Item $SourceUninstall (Join-Path $Base "Uninstall.ps1") -Force }
     Write-GuardLauncher
 
@@ -190,7 +194,7 @@ try {
     }
 
     $config=[ordered]@{
-        Version="1.1.9"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
+        Version="1.2.0"; Enabled=if($oldCfg){[bool]$oldCfg.Enabled}else{$true}; SystemDrive="C:"
         DownloadProtection=if($oldCfg){[bool]$oldCfg.DownloadProtection}else{$true}
         SteamProtection=if($oldCfg){[bool]$oldCfg.SteamProtection}else{$true}
         EpicProtection=if($oldCfg){[bool]$oldCfg.EpicProtection}else{$true}
@@ -241,7 +245,7 @@ try {
     Remove-Item $LegacyDefinitive -Recurse -Force -ErrorAction SilentlyContinue
 
     Write-InstallResult $true "Instalação para todas as contas concluída com sucesso."
-    Write-InstallLog "Instalação v1.1.9 concluída."
+    Write-InstallLog "Instalação v1.2.0 concluída."
     exit 0
 }
 catch {

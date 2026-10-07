@@ -13,7 +13,7 @@ internal sealed class GuardManager
 
     public bool IsInstalled =>
         File.Exists(GuardPaths.GuardCore) &&
-        File.Exists(GuardPaths.Panel) &&
+        File.Exists(GuardPaths.Commands) &&
         File.Exists(GuardPaths.Config);
 
     public async Task<bool> ScheduledTaskExistsAsync()
@@ -102,10 +102,14 @@ internal sealed class GuardManager
 
     public void OpenPanel()
     {
-        if (!File.Exists(GuardPaths.Panel))
+        var exe = Path.Combine(
+            GuardPaths.InstallDirectory,
+            "SSDSystemGuard.exe");
+
+        if (!File.Exists(exe))
             throw new FileNotFoundException(
-                "O painel do Guard não foi encontrado.",
-                GuardPaths.Panel);
+                "O SSD System Guard instalado não foi encontrado.",
+                exe);
 
         StartInstalledHost("--panel");
     }
@@ -260,6 +264,105 @@ internal sealed class GuardManager
             Arguments = $"\"{GuardPaths.Detections}\"",
             UseShellExecute = true
         });
+    }
+
+    public void SaveProtectionSettings(
+        bool downloadProtection,
+        bool steamProtection,
+        bool epicProtection,
+        bool portableGameProtection,
+        bool unknownAppAlerts)
+    {
+        UpdateConfig(cfg =>
+        {
+            cfg["DownloadProtection"] = downloadProtection;
+            cfg["SteamProtection"] = steamProtection;
+            cfg["EpicProtection"] = epicProtection;
+            cfg["PortableGameProtection"] = portableGameProtection;
+            cfg["UnknownAppAlerts"] = unknownAppAlerts;
+        });
+    }
+
+    public (int Blocked, int Alerts) GetDetectionCounts()
+    {
+        var blocked = 0;
+        var alerts = 0;
+
+        try
+        {
+            if (!File.Exists(GuardPaths.Detections))
+                return (0, 0);
+
+            foreach (var line in File.ReadLines(GuardPaths.Detections).Skip(1))
+            {
+                if (line.Contains(
+                        "\"BLOQUEADO\"",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    blocked++;
+                }
+                else if (
+                    line.Contains(
+                        "\"SUSPEITO",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains(
+                        "REQUER VALIDACAO",
+                        StringComparison.OrdinalIgnoreCase) ||
+                    line.Contains(
+                        "REQUER VALIDAÇÃO",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    alerts++;
+                }
+            }
+        }
+        catch
+        {
+            // Counter display is informational only.
+        }
+
+        return (blocked, alerts);
+    }
+
+    public void OpenQuarantine()
+    {
+        var cfg = ReadPublicConfig();
+
+        if (cfg is null || string.IsNullOrWhiteSpace(cfg.QuarantinePath))
+            throw new InvalidOperationException(
+                "Nenhum disco alternativo foi definido para quarentena.");
+
+        Directory.CreateDirectory(cfg.QuarantinePath);
+        ProcessHelper.OpenInExplorer(cfg.QuarantinePath);
+    }
+
+    public Task UnblockAllAsync() =>
+        RunGuardCommandAsync("UnblockAll");
+
+    public Task RebuildBaselineAsync() =>
+        RunGuardCommandAsync("RebuildBaseline");
+
+    private static async Task RunGuardCommandAsync(string action)
+    {
+        if (!File.Exists(GuardPaths.Commands))
+            throw new FileNotFoundException(
+                "O módulo de comandos do Guard não foi encontrado.",
+                GuardPaths.Commands);
+
+        var result = await ProcessHelper.RunAsync(
+            "powershell.exe",
+            "-NoLogo -NoProfile -NonInteractive " +
+            "-ExecutionPolicy Bypass " +
+            $"-File \"{GuardPaths.Commands}\" -Action \"{action}\"");
+
+        if (result.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"A ação '{action}' falhou com código {result.ExitCode}." +
+                (string.IsNullOrWhiteSpace(result.StdErr)
+                    ? ""
+                    : Environment.NewLine + result.StdErr.Trim()));
+        }
     }
 
     public GuardPublicConfig? ReadPublicConfig()

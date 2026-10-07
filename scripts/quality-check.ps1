@@ -1,12 +1,6 @@
 ﻿#requires -Version 5.1
 $ErrorActionPreference = "Stop"
 
-
-# IMPORTANT:
-# Marker checks below must use String.Contains(), not -like.
-# PowerShell wildcard patterns treat [text] as a character class, so a literal
-# marker such as "return [pscustomobject]" can become a false negative with -like.
-
 function Assert-ContainsLiteral {
     param(
         [Parameter(Mandatory=$true)]
@@ -25,7 +19,6 @@ function Assert-ContainsLiteral {
 }
 
 # Self-test do próprio validador.
-# Se isso falhar, o CI está interpretando marcadores literais incorretamente.
 $selfTestText = 'alpha [pscustomobject] $StopFlag omega'
 
 Assert-ContainsLiteral `
@@ -44,15 +37,18 @@ if ($selfTestText.Contains('$DoesNotExist')) {
 
 $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root "src\SSDSystemGuard\SSDSystemGuard.csproj"
-$resources = Join-Path $root "src\SSDSystemGuard\Resources"
+$src = Join-Path $root "src\SSDSystemGuard"
+$resources = Join-Path $src "Resources"
 
 $required = @(
     $project,
-    (Join-Path $root "src\SSDSystemGuard\Program.cs"),
-    (Join-Path $root "src\SSDSystemGuard\BackgroundHost.cs"),
-    (Join-Path $root "src\SSDSystemGuard\GuardManager.cs"),
+    (Join-Path $src "Program.cs"),
+    (Join-Path $src "BackgroundHost.cs"),
+    (Join-Path $src "GuardManager.cs"),
+    (Join-Path $src "AdvancedPanelForm.cs"),
+    (Join-Path $src "NativeAlertForm.cs"),
     (Join-Path $resources "GuardCore.ps1"),
-    (Join-Path $resources "Panel.ps1"),
+    (Join-Path $resources "GuardCommands.ps1"),
     (Join-Path $resources "Install.ps1"),
     (Join-Path $resources "Uninstall.ps1")
 )
@@ -71,76 +67,31 @@ if ([string]::IsNullOrWhiteSpace($version)) {
 }
 
 $installText = Get-Content (Join-Path $resources "Install.ps1") -Raw
+
 if ($installText -notmatch [regex]::Escape('Version="' + $version + '"')) {
     throw "Versão do Install.ps1 não corresponde ao csproj: $version"
 }
 
 $guardText = Get-Content (Join-Path $resources "GuardCore.ps1") -Raw
-$requiredGuardMarkers = @(
+
+foreach ($marker in @(
     "function Check-SteamDownloads",
     "function Check-EpicDownloads",
     "function Invoke-ProcessScan",
     "function Setup-DownloadWatchers",
     "function Test-GuardPathAlreadyBlocked",
-    "function Show-SteamRetryBlockedAlert"
-)
-
-foreach ($marker in $requiredGuardMarkers) {
-    if (-not $guardText.Contains([string]$marker)) {
-        throw "GuardCore.ps1 perdeu função obrigatória: $marker"
-    }
-}
-
-$panelText = Get-Content (Join-Path $resources "Panel.ps1") -Raw
-foreach ($marker in @(
-    'Show-PanelTestAlert "Red"',
-    'Show-PanelTestAlert "Yellow"',
-    "panel_errors.log"
-)) {
-    if (-not $panelText.Contains([string]$marker)) {
-        throw "Panel.ps1 perdeu recurso obrigatório: $marker"
-    }
-}
-
-$hostText = Get-Content (Join-Path $root "src\SSDSystemGuard\BackgroundHost.cs") -Raw
-if (-not $hostText.Contains("RunBackground") -or
-    -not $hostText.Contains("RunPanel")) {
-    throw "BackgroundHost.cs está incompleto."
-}
-
-Write-Host "PASS self-test de marcadores literais"
-Write-Host "PASS arquivos obrigatórios"
-Write-Host "PASS versão consistente: $version"
-Write-Host "PASS marcadores críticos do GuardCore"
-Write-Host "PASS alertas de teste do painel"
-Write-Host "PASS host background/panel"
-
-# PowerShell 7 permits syntax combinations that can regress on Windows PowerShell 5.1.
-# The real parser gate runs separately, but keep this explicit regression guard too.
-if ($guardText -match '\)\.\s*(?:\r?\n)') {
-    throw "GuardCore.ps1 contains member access split after '.', unsafe for Windows PowerShell 5.1."
-}
-
-foreach ($marker in @(
+    "function Show-SteamRetryBlockedAlert",
     "Write-GuardHeartbeat",
     "DOWNLOAD WATCHERS READY"
 )) {
-    if (-not $guardText.Contains([string]$marker)) {
-        throw "GuardCore.ps1 lost runtime diagnostic marker: $marker"
-    }
+    Assert-ContainsLiteral `
+        -Text $guardText `
+        -Marker $marker `
+        -ErrorMessage "GuardCore.ps1 perdeu função/recurso obrigatório: $marker"
 }
 
-
-$installText = Get-Content (Join-Path $resources "Install.ps1") -Raw
-foreach ($marker in @(
-    "RestartCount 999",
-    "RestartInterval (New-TimeSpan -Minutes 1)",
-    "MultipleInstances IgnoreNew",
-    "LaunchGuard.vbs"
-)) {
-    if (-not $installText.Contains([string]$marker)) {
-        throw "Install.ps1 perdeu auto-recuperação: $marker"
-    }
+if ($guardText -match '\)\.\s*(?:\r?\n)') {
+    throw "GuardCore.ps1 contém member access inseguro para Windows PowerShell 5.1."
 }
 
 if ($guardText.Contains("Encerrar até o próximo login")) {
@@ -151,31 +102,60 @@ if ($guardText.Contains('$StopFlag')) {
     throw "GuardCore.ps1 voltou a usar StopFlag."
 }
 
-$panelText = Get-Content (Join-Path $resources "Panel.ps1") -Raw
-if (-not $panelText.Contains("Fechar painel (proteção continua)")) {
-    throw "Panel.ps1 perdeu fechamento seguro."
-}
-
-Write-Host "PASS auto-recuperação da tarefa"
-Write-Host "PASS fechamento de UI não encerra proteção"
-
-
-$panelText = Get-Content (Join-Path $resources "Panel.ps1") -Raw
-
 foreach ($marker in @(
-    "SetUnhandledExceptionMode",
-    "Invoke-PanelSafe",
-    "Timer.Refresh-UI",
-    "RefreshFailureCount",
-    "return [pscustomobject]"
+    "RestartCount 999",
+    "RestartInterval (New-TimeSpan -Minutes 1)",
+    "MultipleInstances IgnoreNew",
+    "LaunchGuard.vbs",
+    "GuardCommands.ps1",
+    "Remove-Item (Join-Path `$Base `"Panel.ps1`")"
 )) {
-    if (-not $panelText.Contains([string]$marker)) {
-        throw "Panel.ps1 perdeu proteção contra exceção recorrente: $marker"
-    }
+    Assert-ContainsLiteral `
+        -Text $installText `
+        -Marker $marker `
+        -ErrorMessage "Install.ps1 perdeu requisito: $marker"
 }
 
-if ($panelText.Contains('return @($red,$yellow)')) {
-    throw "Panel.ps1 voltou a usar retorno de contadores em array ambíguo."
+$programText = Get-Content (Join-Path $src "Program.cs") -Raw
+Assert-ContainsLiteral `
+    -Text $programText `
+    -Marker 'Application.Run(new AdvancedPanelForm())' `
+    -ErrorMessage 'Program.cs não abre o painel nativo.'
+
+if ($programText.Contains("RunPanel(")) {
+    throw "Program.cs voltou a iniciar painel PowerShell."
 }
 
-Write-Host "PASS proteção contra popup .NET recorrente no painel"
+$panelText = Get-Content (Join-Path $src "AdvancedPanelForm.cs") -Raw
+foreach ($marker in @(
+    "NativeAlertForm.ShowRed",
+    "NativeAlertForm.ShowYellow",
+    "SaveProtectionSettings",
+    "UnblockAllAsync",
+    "RebuildBaselineAsync",
+    "FECHAR PAINEL (PROTEÇÃO CONTINUA)",
+    "native_panel_errors.log"
+)) {
+    Assert-ContainsLiteral `
+        -Text $panelText `
+        -Marker $marker `
+        -ErrorMessage "AdvancedPanelForm.cs perdeu recurso: $marker"
+}
+
+$projectText = Get-Content $project -Raw
+if ($projectText.Contains('Resources\*.ps1')) {
+    throw "csproj voltou a embutir Panel.ps1 via wildcard."
+}
+
+Assert-ContainsLiteral `
+    -Text $projectText `
+    -Marker 'Resources\GuardCommands.ps1' `
+    -ErrorMessage 'GuardCommands.ps1 não está embutido no executável.'
+
+Write-Host "PASS self-test de marcadores literais"
+Write-Host "PASS arquivos obrigatórios"
+Write-Host "PASS versão consistente: $version"
+Write-Host "PASS GuardCore e auto-recuperação"
+Write-Host "PASS painel avançado nativo .NET 8"
+Write-Host "PASS alertas de teste nativos"
+Write-Host "PASS Panel.ps1 legado excluído do runtime"

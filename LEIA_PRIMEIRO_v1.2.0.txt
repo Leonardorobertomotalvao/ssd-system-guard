@@ -1,0 +1,30 @@
+SSD System Guard v1.2.0 - PAINEL NATIVO .NET 8
+
+Motivo desta atualização:
+O popup "Os tipos de argumento não correspondem" continuou mesmo após
+tratamentos no Panel.ps1.
+
+O detalhe da exceção mostrou chamadas de:
+System.Management.Automation.Language.PSEnumerableBinder
+
+Ou seja: o erro estava vindo do binder dinâmico do Windows PowerShell 5.1 usado
+pela interface antiga.
+
+Correção definitiva de arquitetura:
+- o painel avançado não é mais PowerShell WinForms;
+- ele foi migrado para C# / .NET 8 WinForms;
+- os alertas de teste também são nativos;
+- PowerShell continua apenas no núcleo e em comandos de sistema sem interface.
+
+Depois de instalar:
+1. abra o painel;
+2. deixe aberto 30-60 segundos;
+3. maximize/minimize/redimensione;
+4. teste vermelho/amarelo;
+5. salve proteções;
+6. pause/retome;
+7. abra logs/detecções;
+8. confirme que não aparece diálogo "Microsoft .NET Framework".
+
+Se houver erro do painel nativo:
+C:\ProgramData\SSDSystemGuard\Data\native_panel_errors.log

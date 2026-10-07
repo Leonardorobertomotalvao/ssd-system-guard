@@ -1,5 +1,8 @@
 # SSD System Guard
 
+> **Atualização v1.2.0:** o painel avançado foi reescrito em C#/.NET 8. A interface não depende mais do WinForms hospedado pelo Windows PowerShell 5.1, eliminando a origem do erro `Os tipos de argumento não correspondem`.
+
+
 **Proteção local para manter novos downloads, instaladores e jogos fora do SSD do sistema (`C:`).**
 
 > **Atualização v1.1.8:** correção do pipeline de validação/Release, mantendo as correções do painel da v1.1.7 e a proteção contínua da v1.1.6.

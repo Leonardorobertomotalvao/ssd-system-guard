@@ -4,9 +4,8 @@ using System.Text;
 namespace SSDSystemGuard;
 
 /// <summary>
-/// Hosts the PowerShell resources without exposing a console.
-/// Background mode detaches immediately so the .NET launcher does not stay
-/// resident beside the Guard. Panel mode remains attached for diagnostics.
+/// Starts the PowerShell protection core without exposing a console.
+/// The advanced panel is native .NET 8 and no longer runs through PowerShell.
 /// </summary>
 internal static class BackgroundHost
 {
@@ -18,8 +17,9 @@ internal static class BackgroundHost
         try
         {
             using var process = Process.Start(
-                CreatePowerShellStartInfo(script, panelMode: false));
+                CreatePowerShellStartInfo(script));
 
+            // Detach immediately; Task Scheduler/LaunchGuard supervises the core.
             return process is null ? 3 : 0;
         }
         catch (Exception ex)
@@ -29,51 +29,7 @@ internal static class BackgroundHost
         }
     }
 
-    public static int RunPanel(string script)
-    {
-        if (!File.Exists(script))
-            return 2;
-
-        try
-        {
-            var psi = CreatePowerShellStartInfo(script, panelMode: true);
-            psi.RedirectStandardError = true;
-            psi.RedirectStandardOutput = true;
-
-            using var proc = Process.Start(psi);
-
-            if (proc is null)
-                return 3;
-
-            var stderrTask = proc.StandardError.ReadToEndAsync();
-            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
-
-            proc.WaitForExit();
-
-            var stderr = stderrTask.GetAwaiter().GetResult();
-            var stdout = stdoutTask.GetAwaiter().GetResult();
-
-            if (proc.ExitCode != 0 || !string.IsNullOrWhiteSpace(stderr))
-            {
-                WriteHostLog(
-                    "panel_host_errors.log",
-                    $"ExitCode={proc.ExitCode}{Environment.NewLine}" +
-                    $"STDERR:{Environment.NewLine}{stderr}{Environment.NewLine}" +
-                    $"STDOUT:{Environment.NewLine}{stdout}");
-            }
-
-            return proc.ExitCode;
-        }
-        catch (Exception ex)
-        {
-            WriteHostLog("panel_host_errors.log", ex.ToString());
-            return 4;
-        }
-    }
-
-    private static ProcessStartInfo CreatePowerShellStartInfo(
-        string script,
-        bool panelMode)
+    private static ProcessStartInfo CreatePowerShellStartInfo(string script)
     {
         var powerShell = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.System),
@@ -85,9 +41,7 @@ internal static class BackgroundHost
             UseShellExecute = false,
             CreateNoWindow = true,
             WorkingDirectory = GuardPaths.InstallDirectory,
-            WindowStyle = panelMode
-                ? ProcessWindowStyle.Normal
-                : ProcessWindowStyle.Hidden
+            WindowStyle = ProcessWindowStyle.Hidden
         };
 
         psi.ArgumentList.Add("-NoLogo");
@@ -96,13 +50,8 @@ internal static class BackgroundHost
         psi.ArgumentList.Add("-STA");
         psi.ArgumentList.Add("-ExecutionPolicy");
         psi.ArgumentList.Add("Bypass");
-
-        if (!panelMode)
-        {
-            psi.ArgumentList.Add("-WindowStyle");
-            psi.ArgumentList.Add("Hidden");
-        }
-
+        psi.ArgumentList.Add("-WindowStyle");
+        psi.ArgumentList.Add("Hidden");
         psi.ArgumentList.Add("-File");
         psi.ArgumentList.Add(script);
 

@@ -1,23 +1,26 @@
 # Changelog
 
-## 1.1.9
+## 1.2.0
 
-### CI / quality-check hotfix
-- corrige falso positivo `GuardCore.ps1 voltou a usar StopFlag`;
-- o validador usava `Contains("$StopFlag")`;
-- dentro do próprio `quality-check.ps1`, `$StopFlag` não existe e era expandido
-  para string vazia;
-- `String.Contains("")` retorna verdadeiro, fazendo o CI falhar sempre;
-- a busca agora usa o literal `'$StopFlag'`;
-- os marcadores restantes de auto-recuperação também passam a usar
-  `String.Contains()` em vez de padrões `-like`;
-- adicionados self-tests do próprio validador para:
-  - colchetes, como `[pscustomobject]`;
-  - cifrão/variável literal, como `$StopFlag`;
-  - ausência de marcadores inexistentes;
-- mantém integralmente as correções funcionais da v1.1.7/v1.1.8.
+### Painel avançado reescrito em C#/.NET 8
+- remove o painel WinForms em PowerShell do runtime;
+- `--panel` agora abre `AdvancedPanelForm`, compilado junto com o executável;
+- elimina a dependência do `PSEnumerableBinder`/binder dinâmico do Windows
+  PowerShell para a interface;
+- corrige de forma estrutural o popup repetitivo:
+  `Microsoft .NET Framework - Os tipos de argumento não correspondem`;
+- alertas vermelho e amarelo agora são janelas nativas .NET 8;
+- layout continua responsivo para notebook, 4K e DPI alto;
+- atualização visual continua em 5 segundos;
+- erros do painel nativo são gravados em `native_panel_errors.log`.
 
-### Importante
-O erro visto no Build da v1.1.8 era novamente do script de validação, e não
-uma confirmação de que o `GuardCore.ps1` havia voltado a usar `StopFlag`.
+### PowerShell permanece somente onde faz sentido
+- `GuardCore.ps1`: monitor/proteção em segundo plano;
+- `GuardCommands.ps1`: desbloqueio de ACL e reconstrução de baseline;
+- `Install.ps1` / `Uninstall.ps1`: instalação e remoção.
+
+### Migração
+- o instalador remove `C:\ProgramData\SSDSystemGuard\Panel.ps1`;
+- o executável deixa de embutir o antigo Panel.ps1;
+- o painel avançado passa a fazer parte diretamente do `SSDSystemGuard.exe`.
 

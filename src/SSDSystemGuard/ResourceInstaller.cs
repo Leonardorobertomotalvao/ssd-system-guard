@@ -7,7 +7,7 @@ internal static class ResourceInstaller
     private static readonly string[] ResourceNames =
     {
         "GuardCore.ps1",
-        "Panel.ps1",
+        "GuardCommands.ps1",
         "Install.ps1",
         "Uninstall.ps1",
         "SSDSystemGuard.ico"

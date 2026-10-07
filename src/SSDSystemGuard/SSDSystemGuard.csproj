@@ -13,9 +13,9 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>assets\SSDSystemGuard.ico</ApplicationIcon>
 
-    <Version>1.1.9</Version>
-    <AssemblyVersion>1.1.9.0</AssemblyVersion>
-    <FileVersion>1.1.9.0</FileVersion>
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
 
     <Authors>SSD System Guard contributors</Authors>
     <Description>Windows utility that helps keep game downloads and new installs off the system SSD.</Description>
@@ -31,7 +31,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Resources\*.ps1" />
+    <EmbeddedResource Include="Resources\GuardCore.ps1" />
+    <EmbeddedResource Include="Resources\GuardCommands.ps1" />
+    <EmbeddedResource Include="Resources\Install.ps1" />
+    <EmbeddedResource Include="Resources\Uninstall.ps1" />
     <EmbeddedResource Include="assets\SSDSystemGuard.ico">
       <LogicalName>SSDSystemGuard.Resources.SSDSystemGuard.ico</LogicalName>
     </EmbeddedResource>
